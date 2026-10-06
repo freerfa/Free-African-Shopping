@@ -1,0 +1,134 @@
+/* Tailwind is compiled at build time (postcss.config.js -> tailwind.config.js).
+   These three layers replace the cdn.tailwindcss.com script previously loaded
+   by index.html, and must come before the custom theming rules below so local
+   styles can still override utilities where they need to. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Runtime theming
+ * ---------------
+ * StoreContext writes these properties on <html> as "R G B" triplets (see
+ * hexToRgbTriplet in lib/format.ts) so the admin colour pickers can re-skin the
+ * whole store without a rebuild. The Tailwind config (tailwind.config.js) reads them
+ * via `rgb(var(--color-*) / <alpha-value>)`, which is what keeps opacity
+ * modifiers such as bg-brand-gold/20 working. The values here are the defaults
+ * and only apply for the instant before React mounts.
+ */
+:root {
+  --color-gold: 212 175 55;
+  --color-gold-light: 234 213 133;
+  /* Darker gold for text/borders on light surfaces: #7E651C keeps >=4.5:1
+     contrast on white, where brand-gold (#D4AF37) only reaches ~2.1:1. */
+  --color-gold-ink: 126 101 28;
+  --color-dark: 26 26 26;
+  --color-offwhite: 245 245 245;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Visible focus for keyboard users, without boxing in ordinary mouse clicks. */
+/* Focus must clear 3:1 against whatever it sits on: brand-gold only reaches
+   ~2.1:1 on light surfaces, so light mode uses the darker ink gold instead. */
+:focus-visible {
+  outline: 2px solid rgb(var(--color-gold-ink));
+  outline-offset: 2px;
+}
+
+.dark :focus-visible {
+  outline-color: rgb(var(--color-gold));
+}
+
+/* Truncation used by ProductCard. Declared explicitly so the card layout does
+   not depend on which Tailwind build the CDN happens to serve. */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Dark-mode scrollbars, so the admin tables do not get a bright bar. */
+.dark ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Announcement marquee (Header)
+   -----------------------------
+   The track holds two identical groups and translates by exactly -50% (one
+   group width), so the loop repeats seamlessly. Each group is at least the
+   viewport wide (min-width: 100vw) so a wide monitor never catches an empty
+   patch, and space-around distributes the copies evenly — the half-portion
+   margins at a group boundary add up to one full portion, matching the
+   spacing inside a group. Hovering pauses so the text can be read. */
+.fas-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: fas-marquee-scroll 40s linear infinite;
+}
+
+.fas-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+.fas-marquee-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  min-width: 100vw;
+  flex-shrink: 0;
+}
+
+@keyframes fas-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Reduced motion: freeze into a single, centred, static copy. The second
+   group stays flex-shrink: 0, so it is clipped away by the bar's
+   overflow-hidden and only one copy remains visible. */
+@media (prefers-reduced-motion: reduce) {
+  .fas-marquee-track {
+    animation: none;
+    width: 100%;
+  }
+
+  .fas-marquee-group {
+    min-width: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .fas-marquee-group > span + span {
+    display: none;
+  }
+
+  .fas-marquee-group > span {
+    white-space: normal;
+  }
+}
+
