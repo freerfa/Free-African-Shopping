@@ -8,6 +8,15 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-06 — Announcement bar copy: Juba delivery
+
+- Changed to **"Delivery available everywhere in Juba, South Sudan."** in both
+  `storeConfig.ts` (fresh-database default) and the live store config.
+- The user supplied the wording, replacing the previous "Free shipping…
+  anywhere in the world" line (see 2026-10-02) with a local-delivery claim.
+
+---
+
 ## 2026-10-06 — Render deployment blueprint: plan corrected to paid
 
 - `render.yaml` changed from `plan: free` to `plan: 0.5c-512mb`

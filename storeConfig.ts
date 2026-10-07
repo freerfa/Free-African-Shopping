@@ -129,11 +129,10 @@ export const DEFAULT_STORE_CONFIG: StoreConfig = {
   storeName: 'Free African Shopping',
   tagline: 'Handcrafted goods with a rich heritage',
   currency: '$',
-  // Announcement marquee (top of every page). Shown only when non-empty.
-  // This repeats 8 times across the scrolling track, so keep it short. It must
-  // stay truthful: the store charges shipping on every order, so there is no
-  // minimum-spend threshold to advertise here.
-  announcement: 'Free shipping on every order, anywhere in the world',
+  // Announcement marquee (top of every page), shown only when non-empty. It
+  // repeats 8 times across the scrolling track, so keep it short and truthful:
+  // the claim scrolls on every page and must match what checkout actually does.
+  announcement: 'Delivery available everywhere in Juba, South Sudan.',
   colors: {
     gold: '#D4AF37',
     goldLight: '#EAD585',
