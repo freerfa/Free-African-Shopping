@@ -8,6 +8,24 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-06 — Render deployment blueprint: plan corrected to paid
+
+- `render.yaml` changed from `plan: free` to `plan: 0.5c-512mb`
+  (legacy name `starter`), keeping the 1 GB persistent disk at `/var/data`.
+- Header comments and `docs/REBUILD.md` now document the real cost:
+  **$7/mo compute + $0.25/mo disk = $7.25/mo** on the free Hobby workspace.
+
+**Why:** the original blueprint paired `plan: free` with a `disk:` block, which
+Render rejects — its docs state free web services don't support persistent
+disks. A blueprint that fails on connect is useless, so the plan had to become
+the cheapest one that supports disks. The disk itself is non-negotiable: the
+store's entire database is one SQLite file, and without the disk every
+redeploy or restart resets products, orders and admin accounts to the seed.
+
+Also documented: with a disk attached, redeploys take a few seconds of downtime
+(Render's guard against two instances writing the same SQLite file), and going
+back to `plan: free` requires deleting the `disk:` block in the same edit.
+
 ---
 
 ## 2026-10-02 — Announcement bar copy corrected

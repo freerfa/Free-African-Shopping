@@ -213,6 +213,46 @@ npm start         # serves API + built client on one port (PORT, default 3001)
 
 When `dist/` exists the server serves it, so one process runs the whole store.
 
+### Production on Render
+
+The repo ships with `render.yaml`, so connecting it needs almost no typing:
+
+1. Open **https://dashboard.render.com/web/new** → **Build and deploy from a Git
+   repository** → select `freerfa/Free-African-Shopping`.
+2. Render detects the blueprint and pre-fills one Web Service:
+   build `npm install && npm run build`, start `npm start`.
+3. Set **`ADMIN_PASSWORD`** in the dashboard (it is required, and never written
+   to the repo). Optionally set `ADMIN_EMAIL` and `GEMINI_API_KEY`.
+4. Deploy. First boot seeds the database on the attached persistent disk
+   (`/var/data` via `DB_DIR`), so products, orders and admin accounts survive
+   every redeploy. **Without that disk the store would reset to the demo seed on
+   each deploy — that disk is the single most important setting.**
+
+The built frontend is served from the same Express process (`dist/`, produced by
+`npm run build`), so one service is the whole store. The service reports
+`/api/health` for Render's health check.
+
+**Cost — this is not a free deploy.** Render's Free plan explicitly does not
+support persistent disks, and the disk is what keeps the SQLite database alive
+across redeploys. The blueprint therefore pins the cheapest paid compute plan:
+
+| Item | Price |
+|---|---|
+| Compute `0.5c-512mb` (512 MB RAM, 0.5 CPU) | $7/month |
+| Persistent disk, 1 GB | $0.25/month |
+| Hobby workspace | $0 |
+| **Total** | **$7.25/month** |
+
+If you change `plan: free` in `render.yaml`, you **must** also delete the
+`disk:` block — Render rejects a blueprint that pairs them — and accept that
+every deploy/restart wipes the database back to the 8-product seed.
+
+Two behavioural notes with a disk attached: redeploys take a few seconds of
+downtime (Render stops the old instance before starting the new one, to prevent
+two instances writing the same SQLite file), and `npm start` uses `tsx`, so
+`devDependencies` must be installed on the build (the default `npm install`
+does this).
+
 ---
 
 ## 7. Acceptance checklist

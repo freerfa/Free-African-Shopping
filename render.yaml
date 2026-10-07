@@ -1,0 +1,37 @@
+# Render blueprint: one Web Service serving the API + the built storefront.
+# `render.yaml` is applied automatically on connect — the only manual step is
+# setting the ADMIN_PASSWORD secret in the dashboard before the first deploy.
+#
+# PLAN AND COST — read before changing `plan`:
+#   Render's Free plan does NOT support persistent disks (Render docs: "Free web
+#   services don't support the following features of paid compute plans: ...
+#   Persistent disks"). This store's whole database is a SQLite file, so without
+#   a disk every redeploy or restart would wipe products, orders and admin
+#   accounts back to the seed demo data.
+#   Cheapest plan that works: 0.5c-512mb (legacy name "starter")
+#     compute $7/mo + 1 GB disk $0.25/mo = $7.25/mo total (Hobby workspace $0).
+#   To go back to plan: free you MUST also delete the `disk:` block below, and
+#   accept that all store data resets on every deploy.
+#   Note: a disk means redeploys take a few seconds of downtime instead of
+#   zero-downtime swaps (Render's data-safety rule).
+services:
+  - type: web
+    name: free-african-shopping
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: DB_DIR
+        value: /var/data
+      - key: ADMIN_EMAIL
+        value: freerfa3@gmail.com
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: store-data
+      mountPath: /var/data
+      sizeGB: 1
+    healthCheckPath: /api/health
