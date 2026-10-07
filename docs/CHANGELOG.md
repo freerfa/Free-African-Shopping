@@ -8,6 +8,23 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-07 — Automatic updates: commits push themselves, Render redeploys
+
+- Installed a **`post-commit` git hook** (`.git/hooks/post-commit`) that pushes
+  `main` to GitHub after every commit, logging each attempt to
+  `.git/auto-push.log`. Uses the absolute Xcode git path and BatchMode SSH so it
+  can never hang on a licence prompt or password request.
+- Documented the full chain in `docs/REBUILD.md` → *Automatic updates: local →
+  GitHub → Render*: GitHub → Render is automatic by Render's own default
+  (quoted from their docs), with `[skip render]` as the escape hatch.
+
+**Why:** the owner asked to never push or deploy by hand — "make the update
+auto, on the render and github, whenever there is changes". Store **data**
+edits (Admin panel on the live site) were already instant and are unaffected;
+the local database stays gitignored by design.
+
+---
+
 ## 2026-10-06 — Announcement bar copy: Juba delivery
 
 - Changed to **"Delivery available everywhere in Juba, South Sudan."** in both

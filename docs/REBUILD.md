@@ -253,6 +253,40 @@ two instances writing the same SQLite file), and `npm start` uses `tsx`, so
 `devDependencies` must be installed on the build (the default `npm install`
 does this).
 
+### Automatic updates: local → GitHub → Render
+
+Once both halves below are in place, **every commit goes live without anyone
+running `git push` or clicking Deploy**:
+
+1. **Local → GitHub** — a `post-commit` git hook pushes `main` after every
+   commit. Hooks are not versioned, so install it once per clone:
+
+   ```sh
+   #!/bin/sh
+   GIT=/Applications/Xcode.app/Contents/Developer/usr/bin/git
+   [ -x "$GIT" ] || GIT=git
+   top=$("$GIT" rev-parse --show-toplevel 2>/dev/null) || exit 0
+   cd "$top" || exit 0
+   [ "$("$GIT" symbolic-ref --short HEAD 2>/dev/null)" = "main" ] || exit 0
+   GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -oBatchMode=yes -oConnectTimeout=10' \
+     "$GIT" push origin main >>"$top/.git/auto-push.log" 2>&1
+   ```
+
+   Save as `.git/hooks/post-commit`, run `chmod +x .git/hooks/post-commit`.
+   The explicit git path matters on machines where plain `git` is blocked by the
+   Xcode licence. Every push is logged to `.git/auto-push.log`.
+
+2. **GitHub → Render** — automatic by default. Render's docs: *"Whenever you
+   push or merge a change to that branch, by default Render automatically
+   rebuilds and redeploys your service."* Confirm the toggle at your service →
+   **Settings → Auto-Deploy**. Put `[skip render]` in a commit message to push
+   code **without** deploying it.
+
+**What this does not cover:** store *data* (products, orders, staff, settings).
+Edits made in the live site's Admin panel are already instant — no deploy
+needed. The local dev database is gitignored and never syncs anywhere by
+design (it contains password hashes); keep production edits on the live site.
+
 ---
 
 ## 7. Acceptance checklist
