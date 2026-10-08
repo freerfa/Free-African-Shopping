@@ -10,6 +10,7 @@
     "build": "vite build",
     "start": "tsx server/index.ts",
     "preview": "vite preview",
+    "test": "tsx verify-filters.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

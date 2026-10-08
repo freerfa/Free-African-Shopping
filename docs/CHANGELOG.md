@@ -8,6 +8,24 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-08 — Storefront filters: price range and availability
+
+- **New filter row** on the home grid (under the category pills): min/max
+  **price** inputs and an **In stock only** toggle, plus a **Clear filters**
+  button whenever any filter is active. The subtitle shows
+  *"N of M product(s) shown"* while filtering.
+- New pure module **`lib/catalogFilters.ts`** — the search, category, price and
+  stock rules moved out of `HomeView` so they can be unit-tested; 23 checks in
+  `verify-filters.ts` cover them (enquiry listings drop out of price ranges,
+  sold-out excluded but stock-untracked services kept, garbage input ignored).
+
+**Why:** the owner asked for filters. Design note: a price bound excludes
+price-on-enquiry listings (they have no number to compare) — they reappear the
+moment the bound clears, and the *In stock only* toggle never hides them
+(untracked stock is not sold out).
+
+---
+
 ## 2026-10-07 — Automatic updates: commits push themselves, Render redeploys
 
 - Installed a **`post-commit` git hook** (`.git/hooks/post-commit`) that pushes
