@@ -77,28 +77,14 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
       <div className="container mx-auto px-4 sm:px-6">
         <Section title="Our Collection" subtitle={subtitle} />
 
-        {availableCategories.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2 mb-6">
-            {[ALL, ...availableCategories].map((category) => (
-              <button
-                key={category}
-                onClick={() => setActiveCategory(category)}
-                className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
-                  activeCategory === category
-                    ? 'border-brand-gold bg-brand-gold text-brand-dark'
-                    : 'border-gray-300 dark:border-dark-border hover:border-brand-gold-ink dark:hover:border-brand-gold'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Category, price and availability filters, all bound to the same
-            state as the pills above (changing one reflects in the other).
-            Local state: leaving Home resets them, "Clear filters" resets all. */}
-        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 mb-10 text-sm">
+        {/* One unified filter bar for the whole grid: category, price and
+            availability in a single row (the old category-pill row was folded
+            in here). Local state: leaving Home resets it, Clear resets all. */}
+        <div
+          id="catalog-filters"
+          className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 mb-10 text-sm"
+        >
+          <span className="font-semibold text-brand-dark dark:text-dark-text">Filters</span>
           {availableCategories.length > 0 && (
             <span className="flex items-center gap-1.5">
               <span className="font-medium text-gray-700 dark:text-gray-300">Category</span>

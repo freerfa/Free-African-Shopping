@@ -10,11 +10,11 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ## 2026-10-08 — Storefront filters: price range and availability
 
-- **New filter row** on the home grid (under the category pills): a **Category**
-  dropdown, min/max **price** inputs and an **In stock only** toggle, plus a
-  **Clear filters** button whenever any filter is active. The dropdown and the
-  pills above share one state, so changing either reflects in the other. The
-  subtitle shows *"N of M product(s) shown"* while filtering.
+- **New unified "Filters" bar** on the home grid: a **Category** dropdown, min/max
+  **price** inputs and an **In stock only** toggle, plus a **Clear filters**
+  button whenever any filter is active. The old category-pill row was folded
+  into this single bar, so category selection and the rest of the filters live
+  in one place. The subtitle shows *"N of M product(s) shown"* while filtering.
 - New pure module **`lib/catalogFilters.ts`** — the search, category, price and
   stock rules moved out of `HomeView` so they can be unit-tested; 23 checks in
   `verify-filters.ts` cover them (enquiry listings drop out of price ranges,
