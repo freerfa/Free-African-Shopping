@@ -64,11 +64,11 @@ Environment variables for the server:
 ## Using the store
 
 - **Browse** — the home page lists every *live* product. Use the search box in the
-  header, filter by category, or narrow further with the **price range** (min/max)
-  and **In stock only** controls under the category pills — the result count
-  updates live and **Clear filters** resets everything at once. The announcement
-  bar, store name, tagline, currency and brand colours are all editable under
-  **Admin → Settings**.
+  header, filter by category (the pills, or the **Category** dropdown in the
+  filter row — both stay in sync), or narrow further with the **price range**
+  (min/max) and **In stock only** controls. The result count updates live and
+  **Clear filters** resets everything at once. The announcement bar, store name,
+  tagline, currency and brand colours are all editable under **Admin → Settings**.
 - **Cart and checkout** — add items, adjust quantities, then check out. The cart
   warns you (and blocks checkout) if an item is no longer available in the
   quantity you picked — stock can change if the admin edits it while you shop —

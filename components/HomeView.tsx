@@ -95,9 +95,28 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
           </div>
         )}
 
-        {/* Price + availability filters. Purely local state: leaving Home
-            resets them, and "Clear filters" resets them in place. */}
+        {/* Category, price and availability filters, all bound to the same
+            state as the pills above (changing one reflects in the other).
+            Local state: leaving Home resets them, "Clear filters" resets all. */}
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 mb-10 text-sm">
+          {availableCategories.length > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span className="font-medium text-gray-700 dark:text-gray-300">Category</span>
+              <select
+                value={activeCategory}
+                onChange={(e) => setActiveCategory(e.target.value)}
+                aria-label="Filter by category"
+                className="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-card dark:text-dark-text cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-gold-ink focus:border-brand-gold-ink dark:focus:ring-brand-gold"
+              >
+                {[ALL, ...availableCategories].map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
+
           <span className="font-medium text-gray-700 dark:text-gray-300">Price</span>
           <span className="flex items-center gap-1.5">
             <span aria-hidden="true" className="text-gray-400">{config.currency}</span>
