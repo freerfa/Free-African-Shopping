@@ -122,6 +122,69 @@ export interface Order {
   paymentConfirmed?: boolean;
   /** Admin note, e.g. "Stanbic transfer verified against the statement". */
   paymentNote?: string;
+  /** Discount a validated coupon took off the subtotal. Absent when no coupon
+   *  was used; the server computes it — never the client. */
+  discount?: number;
+  /** The coupon code that produced `discount`, snapshotted at order time. */
+  couponCode?: string;
+}
+
+/** What `POST /api/orders/track` hands back — a deliberate subset of the order.
+ *  Enough to tell the shopper where their order stands, nothing they did not
+ *  already give us (no email, phone or address is echoed back). */
+export interface TrackedOrder {
+  reference: string;
+  createdAt: number;
+  status: OrderStatus;
+  customerName: string;
+  lines: OrderLine[];
+  total: number;
+  discount?: number;
+  couponCode?: string;
+  paymentMethod?: PaymentMethod;
+  paymentConfirmed?: boolean;
+}
+
+/** The kind of discount a coupon applies. */
+export type CouponKind = 'percent' | 'fixed';
+
+/** A promo code managed in Admin → Coupons and applied at checkout.
+ *  `code` is stored UPPERCASE-normalised (see `normalizeCouponCode`) so the
+ *  shopper can type it in any case and the UNIQUE index still holds. */
+export interface Coupon {
+  id: string;
+  code: string;
+  /** `percent` of the subtotal (0–100), or a `fixed` amount in store currency. */
+  kind: CouponKind;
+  value: number;
+  /** Subtotal the cart must reach before the code applies; 0 = no minimum. */
+  minSubtotal: number;
+  /** Epoch ms after which the code stops working; null = never expires. */
+  expiresAt: number | null;
+  /** Admin can park a code without deleting it. */
+  active: boolean;
+  createdAt: number;
+}
+
+export type ReviewStatus = 'pending' | 'approved';
+
+/** One customer review of a product. Reviews are moderated: a new submission
+ *  arrives as `pending` and only appears publicly once approved. */
+export interface ProductReview {
+  id: string;
+  productId: string;
+  author: string;
+  /** Integer 1–5 stars. */
+  rating: number;
+  comment: string;
+  createdAt: number;
+  status: ReviewStatus;
+}
+
+/** Aggregate of approved reviews for one product (drive the card badge). */
+export interface ReviewSummary {
+  count: number;
+  average: number;
 }
 
 /**
@@ -147,6 +210,8 @@ export type Permission =
   | 'settings.manage'
   /** Edit payment methods, the bank account and mobile-money wallets. */
   | 'payments.manage'
+  /** Create, edit, activate and remove discount codes. */
+  | 'coupons.manage'
   /** Browse the raw database records table. */
   | 'database.view'
   /** Run database file tools: integrity check, optimize, backup, purge orders. */
@@ -167,6 +232,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'orders.editRecords',
   'settings.manage',
   'payments.manage',
+  'coupons.manage',
   'database.view',
   'database.manage',
   'data.import',
@@ -183,6 +249,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'orders.editRecords': 'Record offline orders, and edit or delete order records',
   'settings.manage': 'Change store details, colours, categories and contact info',
   'payments.manage': 'Change payment methods, bank account and mobile money',
+  'coupons.manage': 'Create, edit and remove discount codes',
   'database.view': 'Browse the raw database records',
   'database.manage': 'Run database tools (check, optimize, backup, purge orders)',
   'data.import': 'Export the store and import a snapshot',
@@ -263,6 +330,8 @@ export enum View {
   Checkout,
   Admin,
   Login,
+  Wishlist,
+  TrackOrder,
 }
 
 export interface ThemeContextType {

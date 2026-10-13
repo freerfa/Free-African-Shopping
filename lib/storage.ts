@@ -8,6 +8,9 @@ export const STORAGE_KEYS = {
   cart: `${PREFIX}cart`,
   orders: `${PREFIX}orders`,
   session: `${PREFIX}session`,
+  /** Saved-for-later product ids. Shopper state like `cart`: lives in
+   *  localStorage on purpose, never leaves the browser. */
+  wishlist: `${PREFIX}wishlist`,
   /** Admin bearer token for the REST API. The only key the app still writes
    *  besides `cart` — config/products/orders now live in the server database
    *  (the older keys are left in place so pre-migration data stays readable

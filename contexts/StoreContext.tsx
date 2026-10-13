@@ -7,6 +7,7 @@ import type {
   OrderStatus,
   PaymentInfo,
   Product,
+  ReviewSummary,
   StoreConfig,
   StorePayments,
   StoreSnapshot,
@@ -43,6 +44,17 @@ interface StoreContextValue {
   categories: string[];
   /** Payment settings, always fully populated (older configs have no `payments`). */
   payments: StorePayments;
+
+  /** Saved-for-later product ids. Shopper state kept in localStorage like the
+   *  cart — it never leaves this browser. */
+  wishlist: string[];
+  wishlistCount: number;
+  toggleWishlist: (productId: string) => void;
+
+  /** Approved-review aggregates keyed by product id (public data from the
+   *  server), so cards can show a star badge without N round-trips. */
+  reviewSummaries: Record<string, ReviewSummary>;
+  refreshReviewSummaries: () => Promise<void>;
 
   /** Local-first edit; the server sync is debounced (settings forms fire per keystroke). */
   updateConfig: (patch: Partial<StoreConfig>) => void;
@@ -111,6 +123,11 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [config, setConfig] = useState<StoreConfig>(DEFAULT_STORE_CONFIG);
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>(() => loadState<CartItem[]>(STORAGE_KEYS.cart, []));
+  // Saved-for-later ids: shopper state, persisted per browser like the cart.
+  const [wishlist, setWishlist] = useState<string[]>(() =>
+    loadState<string[]>(STORAGE_KEYS.wishlist, []),
+  );
+  const [reviewSummaries, setReviewSummaries] = useState<Record<string, ReviewSummary>>({});
   const [orders, setOrders] = useState<Order[]>([]);
   const [user, setUser] = useState<User | null>(null);
   // Last config the server knows about (boot value or last push); the
@@ -161,6 +178,24 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // The cart stays per-browser: it is shopper state, not store data.
   useEffect(() => { saveState(STORAGE_KEYS.cart, cart); }, [cart]);
+  // Same deal for the wishlist — ids only, so even a full quota is unlikely.
+  useEffect(() => { saveState(STORAGE_KEYS.wishlist, wishlist); }, [wishlist]);
+
+  // Review aggregates are public but not needed for boot — fetch them after
+  // the store is interactive so a slow reviews query never blocks shopping.
+  const refreshReviewSummaries = useCallback(async () => {
+    try {
+      setReviewSummaries(await api.getReviewSummaries());
+    } catch (error) {
+      // Non-fatal: the grid simply shows no star badges.
+      console.warn('[store] Could not load review summaries:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!booted) return;
+    void refreshReviewSummaries();
+  }, [booted, refreshReviewSummaries]);
 
   // Debounced server sync for admin settings — updateConfig fires on every
   // keystroke, so coalesce bursts into one PUT ~600ms after typing stops.
@@ -282,8 +317,9 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const deleteProduct = useCallback(
     async (id: string): Promise<void> => {
       setProducts((prev) => prev.filter((p) => p.id !== id));
-      // Keep the cart consistent with the catalogue.
+      // Keep the cart and wishlist consistent with the catalogue.
       setCart((prev) => prev.filter((item) => item.productId !== id));
+      setWishlist((prev) => prev.filter((savedId) => savedId !== id));
       try {
         await api.deleteProduct(id);
       } catch (error) {
@@ -341,6 +377,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [productsById],
   );
 
+  const toggleWishlist = useCallback((productId: string) => {
+    setWishlist((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId],
+    );
+  }, []);
+
   const updateCartQuantity = useCallback(
     (key: string, quantity: number) => {
       // Guard against NaN arriving from a cleared or malformed number input.
@@ -382,6 +424,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       phone,
       address,
       payment,
+      couponCode,
     }: {
       name: string;
       email: string;
@@ -389,6 +432,9 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       address: string;
       /** Omitted when the payment system is hidden (`payments.status === 'hide'`). */
       payment?: PaymentInfo;
+      /** Shopper-typed discount code. The server re-validates it and computes
+       *  the discount — an unknown or stale code fails the whole order. */
+      couponCode?: string;
     }): Promise<Order> => {
       // Stock can change between adding to the cart and checking out (another
       // browser tab, or an admin edit). Re-check here for instant feedback,
@@ -419,6 +465,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           quantity: item.quantity,
         })),
         payment,
+        couponCode,
       );
       setOrders((prev) => [order, ...prev]);
       // Optimistic stock decrement mirroring what the server just wrote.
@@ -647,10 +694,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return cleared;
   }, []);
 
+  const wishlistCount = wishlist.length;
+
   const value = useMemo<StoreContextValue>(
     () => ({
       config, products, cart, orders, user, detailedCart, cartCount, cartSubtotal,
       liveProducts, categories, payments,
+      wishlist, wishlistCount, toggleWishlist,
+      reviewSummaries, refreshReviewSummaries,
       updateConfig, updatePayments, saveProduct, deleteProduct, toggleProductStatus,
       addToCart, updateCartQuantity, removeFromCart, clearCart,
       placeOrder, updateOrderStatus, updateOrderPayment, updateOrder, deleteOrder,
@@ -660,6 +711,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [
       config, products, cart, orders, user, detailedCart, cartCount, cartSubtotal,
       liveProducts, categories, payments,
+      wishlist, wishlistCount, toggleWishlist,
+      reviewSummaries, refreshReviewSummaries,
       updateConfig, updatePayments, saveProduct, deleteProduct, toggleProductStatus,
       addToCart, updateCartQuantity, removeFromCart, clearCart,
       placeOrder, updateOrderStatus, updateOrderPayment, updateOrder, deleteOrder,

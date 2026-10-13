@@ -6,14 +6,18 @@
  * human-readable message so views can surface it directly.
  */
 import type {
+  Coupon,
   Order,
   OrderStatus,
   PaymentInfo,
   Permission,
   Product,
+  ProductReview,
+  ReviewSummary,
   StaffMember,
   StoreConfig,
   StoreSnapshot,
+  TrackedOrder,
   User,
 } from '../types';
 import { STORAGE_KEYS, loadState } from './storage';
@@ -121,12 +125,19 @@ export const api = {
 
   getOrders: () => request<Order[]>('/api/orders'),
   /** `payment` records how the shopper chose to pay; the server validates it
-   *  against the enabled methods and snapshots the receiving account. */
+   *  against the enabled methods and snapshots the receiving account.
+   *  `couponCode`, when present, is re-validated server-side and the discount
+   *  is computed there — the client's preview is never trusted. */
   placeOrder: (
     details: { name: string; email: string; phone: string; address: string },
     lines: { productId: string; variantId: string | null; quantity: number }[],
     payment?: PaymentInfo,
-  ) => request<Order>('/api/orders', { method: 'POST', body: { ...details, lines, payment } }),
+    couponCode?: string,
+  ) =>
+    request<Order>('/api/orders', {
+      method: 'POST',
+      body: { ...details, lines, payment, couponCode },
+    }),
   setOrderStatus: (id: string, status: OrderStatus) =>
     request<void>(`/api/orders/${encodeURIComponent(id)}/status`, {
       method: 'PUT',
@@ -163,6 +174,57 @@ export const api = {
     request<LoginResult>('/api/auth/login', { method: 'POST', body: { email, password } }),
   me: () => request<{ user: User }>('/api/auth/me'),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+
+  // ---- coupons -------------------------------------------------------------
+  /** Public: checks a shopper-typed code against a subtotal. Resolves with the
+   *  discount amount; throws `ApiError` with the reason when it cannot apply. */
+  validateCoupon: (code: string, subtotal: number) =>
+    request<{ code: string; discount: number }>('/api/coupons/validate', {
+      method: 'POST',
+      body: { code, subtotal },
+    }),
+  getCoupons: () => request<{ coupons: Coupon[] }>('/api/coupons'),
+  createCoupon: (coupon: Omit<Coupon, 'createdAt'>) =>
+    request<{ coupon: Coupon }>('/api/coupons', { method: 'POST', body: coupon }),
+  updateCoupon: (id: string, patch: Partial<Coupon>) =>
+    request<{ coupon: Coupon }>(`/api/coupons/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: patch,
+    }),
+  deleteCoupon: (id: string) =>
+    request<void>(`/api/coupons/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // ---- order tracking ------------------------------------------------------
+  /** Public: reference + email/phone lookup. Throws 404 when neither matches. */
+  trackOrder: (reference: string, email: string, phone: string) =>
+    request<{ order: TrackedOrder }>('/api/orders/track', {
+      method: 'POST',
+      body: { reference, email, phone },
+    }),
+
+  // ---- reviews -------------------------------------------------------------
+  /** Public: approved reviews for one product, newest first. */
+  getReviews: (productId: string) =>
+    request<{ reviews: ProductReview[] }>(
+      `/api/products/${encodeURIComponent(productId)}/reviews`,
+    ),
+  /** Public: submit a review; it lands as `pending` until an admin approves. */
+  submitReview: (input: { productId: string; author: string; rating: number; comment: string }) =>
+    request<{ review: ProductReview }>(
+      `/api/products/${encodeURIComponent(input.productId)}/reviews`,
+      { method: 'POST', body: input },
+    ),
+  /** Public: approved-review aggregates for every product (card badges). */
+  getReviewSummaries: () => request<Record<string, ReviewSummary>>('/api/reviews/summary'),
+  /** Admin: every review incl. pending, newest first. */
+  getAdminReviews: () => request<{ reviews: ProductReview[] }>('/api/reviews'),
+  setReviewStatus: (id: string, status: 'pending' | 'approved') =>
+    request<{ review: ProductReview }>(`/api/reviews/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: { status },
+    }),
+  deleteReview: (id: string) =>
+    request<void>(`/api/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // ---- staff accounts ------------------------------------------------------
   /** The owner is returned alongside the list so the panel can show it as the

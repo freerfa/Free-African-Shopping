@@ -16,7 +16,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Order, OrderStatus, Product, StoreConfig } from '../types';
+import type { Coupon, Order, OrderStatus, Product, ProductReview, StoreConfig } from '../types';
 import { INITIAL_PRODUCTS } from '../constants';
 import { DEFAULT_STORE_CONFIG } from '../storeConfig';
 import { normalizeProduct } from '../lib/storage';
@@ -75,6 +75,24 @@ db.exec(`
     permissions TEXT NOT NULL,
     created_at  INTEGER NOT NULL
   );
+
+  -- Discount codes (Admin → Coupons). The code is stored UPPERCASE so the UNIQUE
+  -- index makes "save10" and "SAVE10" the same coupon.
+  CREATE TABLE IF NOT EXISTS coupons (
+    id   TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    data TEXT NOT NULL
+  );
+
+  -- Customer reviews (moderated: pending until approved in the admin panel).
+  CREATE TABLE IF NOT EXISTS reviews (
+    id         TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    data       TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
 `);
 
 /** Store identity seeded on first run. `adminPassword` is intentionally empty:
@@ -266,6 +284,116 @@ export const updateOrderFields = (id: string, patch: Partial<Order>): Order | nu
     id,
   );
   return merged;
+};
+
+// ---- coupons ---------------------------------------------------------------
+
+export const allCoupons = (): Coupon[] =>
+  (db.prepare('SELECT data FROM coupons').all() as { data: string }[])
+    .map((row) => JSON.parse(row.data) as Coupon)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+export const getCoupon = (id: string): Coupon | null => {
+  const row = db.prepare('SELECT data FROM coupons WHERE id = ?').get(id) as
+    | { data: string }
+    | undefined;
+  return row ? (JSON.parse(row.data) as Coupon) : null;
+};
+
+/** Lookup by the normalised (UPPERCASE) code — the shopper's input is
+ *  normalised by the route before calling this. */
+export const getCouponByCode = (code: string): Coupon | null => {
+  const row = db.prepare('SELECT data FROM coupons WHERE code = ?').get(code) as
+    | { data: string }
+    | undefined;
+  return row ? (JSON.parse(row.data) as Coupon) : null;
+};
+
+export const insertCoupon = (coupon: Coupon): void => {
+  db.prepare('INSERT INTO coupons (id, code, data) VALUES (?, ?, ?)').run(
+    coupon.id,
+    coupon.code,
+    JSON.stringify(coupon),
+  );
+};
+
+/** Replaces a coupon; the code column is rewritten alongside the JSON blob so
+ *  the UNIQUE index and the record never drift. Returns false when missing. */
+export const updateCouponRow = (coupon: Coupon): boolean =>
+  db.prepare('UPDATE coupons SET code = ?, data = ? WHERE id = ?')
+    .run(coupon.code, JSON.stringify(coupon), coupon.id).changes > 0;
+
+export const removeCoupon = (id: string): boolean =>
+  db.prepare('DELETE FROM coupons WHERE id = ?').run(id).changes > 0;
+
+// ---- reviews ---------------------------------------------------------------
+
+export const allReviews = (productId?: string): ProductReview[] => {
+  const rows = (
+    productId
+      ? db.prepare('SELECT data FROM reviews WHERE product_id = ? ORDER BY created_at DESC').all(productId)
+      : db.prepare('SELECT data FROM reviews ORDER BY created_at DESC').all()
+  ) as { data: string }[];
+  return rows.map((row) => JSON.parse(row.data) as ProductReview);
+};
+
+export const getReview = (id: string): ProductReview | null => {
+  const row = db.prepare('SELECT data FROM reviews WHERE id = ?').get(id) as
+    | { data: string }
+    | undefined;
+  return row ? (JSON.parse(row.data) as ProductReview) : null;
+};
+
+export const insertReview = (review: ProductReview): void => {
+  db.prepare(
+    'INSERT INTO reviews (id, product_id, status, created_at, data) VALUES (?, ?, ?, ?, ?)',
+  ).run(review.id, review.productId, review.status, review.createdAt, JSON.stringify(review));
+};
+
+/** Mirrors `status` onto the indexed column alongside the JSON blob.
+ *  Returns false when the review does not exist. */
+export const updateReviewStatusRow = (id: string, status: ProductReview['status']): boolean => {
+  const review = getReview(id);
+  if (!review) return false;
+  db.prepare('UPDATE reviews SET status = ?, data = ? WHERE id = ?').run(
+    status,
+    JSON.stringify({ ...review, status }),
+    id,
+  );
+  return true;
+};
+
+export const removeReview = (id: string): boolean =>
+  db.prepare('DELETE FROM reviews WHERE id = ?').run(id).changes > 0;
+
+/** Approved-review aggregates per product for the public card badges. */
+export const reviewSummaries = (): Record<string, { count: number; average: number }> => {
+  const rows = db
+    .prepare("SELECT data FROM reviews WHERE status = 'approved'")
+    .all() as { data: string }[];
+  const acc = new Map<string, { count: number; total: number }>();
+  for (const row of rows) {
+    const review = JSON.parse(row.data) as ProductReview;
+    const entry = acc.get(review.productId) ?? { count: 0, total: 0 };
+    entry.count += 1;
+    entry.total += review.rating;
+    acc.set(review.productId, entry);
+  }
+  const out: Record<string, { count: number; average: number }> = {};
+  for (const [productId, { count, total }] of acc) {
+    out[productId] = { count, average: Math.round((total / count) * 10) / 10 };
+  }
+  return out;
+};
+
+// ---- orders (lookup helpers) ----------------------------------------------
+
+/** Lookup by the FAS-###### reference a shopper was given at checkout. */
+export const getOrderByReference = (reference: string): Order | null => {
+  const row = db.prepare('SELECT data FROM orders WHERE reference = ?').get(reference) as
+    | { data: string }
+    | undefined;
+  return row ? (JSON.parse(row.data) as Order) : null;
 };
 
 // ---- first-run seeding ----------------------------------------------------

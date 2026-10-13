@@ -13,43 +13,61 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
+  Coupon,
+  CouponKind,
   Order,
   OrderStatus,
   PaymentInfo,
   PaymentMethod,
   Permission,
   Product,
+  ProductReview,
   StoreConfig,
   StorePayments,
   StoreSnapshot,
+  TrackedOrder,
 } from '../types';
 import { ALL_PERMISSIONS } from '../types';
 import { PAYMENT_METHOD_LABELS, paymentMethodStatus } from '../lib/payments';
+import { couponDiscount, couponProblem, normalizeCouponCode } from '../lib/coupons';
 import { createId, normalizeProduct, normalizeProducts } from '../lib/storage';
 import { chargeablePrice } from '../lib/product';
 import {
+  allCoupons,
   allOrders,
   allProducts,
+  allReviews,
   clearOrders,
   dataDir,
   db,
   dbFile,
   DEFAULT_CONFIG,
+  getCoupon,
+  getCouponByCode,
+  getOrderByReference,
   getProduct,
+  getReview,
   getSetting,
+  insertCoupon,
   insertOrder,
   insertProduct,
+  insertReview,
   orderReferenceExists,
+  removeCoupon,
   removeOrder,
   removeProduct,
+  removeReview,
   replaceOrders,
   replaceProducts,
+  reviewSummaries,
   seedProducts,
   setSetting,
+  updateCouponRow,
   updateOrderFields,
   updateOrderPaymentNote,
   updateOrderStatusRow,
   updateProductData,
+  updateReviewStatusRow,
 } from './db';
 import { normalizePayments } from '../storeConfig';
 import {
@@ -569,6 +587,7 @@ const createOrder = (
   details: { name: string; email: string; phone: string; address: string },
   payment: PaymentInfo | undefined,
   requested: RequestedLine[],
+  couponCode?: string,
 ): Order => {
   const run = db.transaction((): Order => {
     if (requested.length === 0) throw new HttpError(400, 'Your cart is empty.');
@@ -623,6 +642,30 @@ const createOrder = (
       reference = `FAS-${Math.floor(100000 + Math.random() * 899999)}`;
     } while (orderReferenceExists(reference));
 
+    // Discount: the client's preview is never trusted — the code is looked up
+    // fresh here, inside the transaction, so a stale/edited/expired code fails
+    // the whole order rather than silently charging the wrong amount.
+    const subtotal = resolved.reduce(
+      (sum, entry) => sum + chargeablePrice(entry.unitPrice) * entry.quantity,
+      0,
+    );
+    let discount = 0;
+    const appliedCode = couponCode ? normalizeCouponCode(couponCode) : '';
+    if (appliedCode) {
+      const coupon = getCouponByCode(appliedCode);
+      if (!coupon) {
+        throw new HttpError(400, `Discount code \"${appliedCode}\" was not found.`);
+      }
+      const config = getSetting<StoreConfig>('config');
+      const problem = couponProblem(coupon, subtotal, (value) =>
+        // The message only needs a number + symbol; exact formatting is the
+        // checkout's job, this just has to read sensibly in an error.
+        `${config?.currency ?? ''}${value}`,
+      );
+      if (problem) throw new HttpError(400, problem.message);
+      discount = couponDiscount(coupon, subtotal);
+    }
+
     const order: Order = {
       id: createId('order'),
       reference,
@@ -643,12 +686,15 @@ const createOrder = (
         price: chargeablePrice(entry.unitPrice),
         quantity: entry.quantity,
       })),
-      total: resolved.reduce((sum, entry) => sum + chargeablePrice(entry.unitPrice) * entry.quantity, 0),
+      total: Math.max(0, Math.round((subtotal - discount) * 100) / 100),
       status: 'pending',
       // Manual methods: recorded here, verified by the admin later. Payment is
       // never trusted for pricing — the total above is computed from the DB.
       // Absent when the payment system is hidden and the shopper picked nothing.
       ...(payment ? { payment } : {}),
+      // Snapshots so an old order still shows which code took what off, even
+      // after the admin edits or deletes the coupon.
+      ...(discount > 0 ? { discount, couponCode: appliedCode } : {}),
     };
 
     // Decrement stock per product, aggregating lines: one cart can hold a base
@@ -693,6 +739,7 @@ app.post('/api/orders', (req, res) => {
       address?: unknown;
       lines?: unknown;
       payment?: unknown;
+      couponCode?: unknown;
     };
     const details = {
       name: typeof body.name === 'string' ? body.name.trim() : '',
@@ -725,7 +772,14 @@ app.post('/api/orders', (req, res) => {
       }))
       .filter((l) => l.productId.length > 0 && l.quantity > 0);
 
-    res.status(201).json(createOrder(details, payment, requested));
+    // A blank string means "no coupon"; anything else is re-validated inside
+    // createOrder's transaction (an unknown/expired code aborts with 400).
+    const couponCode =
+      typeof body.couponCode === 'string' && body.couponCode.trim()
+        ? body.couponCode.trim()
+        : undefined;
+
+    res.status(201).json(createOrder(details, payment, requested, couponCode));
   } catch (error) {
     sendError(res, error);
   }
@@ -987,6 +1041,255 @@ app.delete('/api/staff/:email', requireAdmin, requirePermission('staff.manage'),
     sendError(res, error);
   }
 });
+
+// ---- coupons ---------------------------------------------------------------
+
+/** Reads and validates a coupon body off the network. Admin writes the code in
+ *  any case; it is stored normalised so the shopper's input always matches and
+ *  the UNIQUE index holds. Percent values are clamped to 0–100; a fixed value
+ *  may not be negative. */
+const readCouponBody = (body: unknown): Omit<Coupon, 'id' | 'createdAt'> => {
+  if (!body || typeof body !== 'object') throw new HttpError(400, 'Invalid discount code payload.');
+  const draft = body as Partial<Coupon>;
+  const code = typeof draft.code === 'string' ? normalizeCouponCode(draft.code) : '';
+  if (!code) throw new HttpError(400, 'Give the discount code a code.');
+  const kind: CouponKind = draft.kind === 'fixed' ? 'fixed' : 'percent';
+  const rawValue = typeof draft.value === 'number' && Number.isFinite(draft.value) ? draft.value : NaN;
+  if (Number.isNaN(rawValue) || rawValue < 0) {
+    throw new HttpError(400, 'Enter a discount value of 0 or more.');
+  }
+  if (kind === 'percent' && rawValue > 100) {
+    throw new HttpError(400, 'A percentage discount cannot exceed 100%.');
+  }
+  const value = Math.round(rawValue * 100) / 100;
+  const minSubtotal =
+    typeof draft.minSubtotal === 'number' && Number.isFinite(draft.minSubtotal)
+      ? Math.max(0, draft.minSubtotal)
+      : 0;
+  const expiresAt =
+    typeof draft.expiresAt === 'number' && Number.isFinite(draft.expiresAt) ? draft.expiresAt : null;
+  return { code, kind, value, minSubtotal, expiresAt, active: draft.active !== false };
+};
+
+app.get('/api/coupons', requireAdmin, requirePermission('coupons.manage'), (_req, res) => {
+  try {
+    res.json({ coupons: allCoupons() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.post('/api/coupons', requireAdmin, requirePermission('coupons.manage'), (req, res) => {
+  try {
+    const fields = readCouponBody(req.body);
+    if (getCouponByCode(fields.code)) {
+      throw new HttpError(409, `The code "${fields.code}" already exists.`);
+    }
+    const coupon: Coupon = { id: createId('coupon'), createdAt: Date.now(), ...fields };
+    insertCoupon(coupon);
+    res.status(201).json({ coupon });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      sendError(res, new HttpError(409, 'That code already exists.'));
+      return;
+    }
+    sendError(res, error);
+  }
+});
+
+app.put('/api/coupons/:id', requireAdmin, requirePermission('coupons.manage'), (req, res) => {
+  try {
+    const id = routeParam(req.params.id);
+    const existing = getCoupon(id);
+    if (!existing) throw new HttpError(404, 'That discount code no longer exists.');
+    const fields = readCouponBody(req.body);
+    // The code may be renamed, but not onto one that already belongs to another id.
+    if (fields.code !== existing.code && getCouponByCode(fields.code)) {
+      throw new HttpError(409, `The code "${fields.code}" already exists.`);
+    }
+    const coupon: Coupon = { ...existing, ...fields };
+    updateCouponRow(coupon);
+    res.json({ coupon });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint')) {
+      sendError(res, new HttpError(409, 'That code already exists.'));
+      return;
+    }
+    sendError(res, error);
+  }
+});
+
+app.delete('/api/coupons/:id', requireAdmin, requirePermission('coupons.manage'), (req, res) => {
+  try {
+    const id = routeParam(req.params.id);
+    if (!removeCoupon(id)) {
+      throw new HttpError(404, 'That discount code no longer exists.');
+    }
+    res.status(204).end();
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Public: the checkout previews a code as the shopper types, then again at
+// checkout where the server recomputes it — the response here is advisory only
+// and never trusted for pricing.
+app.post('/api/coupons/validate', (req, res) => {
+  try {
+    const body = (req.body ?? {}) as { code?: unknown; subtotal?: unknown };
+    const code = typeof body.code === 'string' ? normalizeCouponCode(body.code) : '';
+    if (!code) throw new HttpError(400, 'Enter a discount code.');
+    const subtotal =
+      typeof body.subtotal === 'number' && Number.isFinite(body.subtotal) ? body.subtotal : 0;
+    const coupon = getCouponByCode(code);
+    if (!coupon) throw new HttpError(400, `Discount code "${code}" was not found.`);
+    const config = getSetting<StoreConfig>('config');
+    const problem = couponProblem(coupon, subtotal, (value) => `${config?.currency ?? ''}${value}`);
+    if (problem) throw new HttpError(400, problem.message);
+    res.json({ code, discount: couponDiscount(coupon, subtotal) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+
+// ---- order tracking --------------------------------------------------------
+
+// Public: a shopper checks where their order stands by giving the FAS-######
+// reference plus the email or phone they ordered with. Only a safe subset of the
+// order is returned — nothing the shopper did not already provide. The failure
+// message is deliberately vague ("could not find") so the endpoint cannot be
+// used to enumerate which references exist.
+app.post('/api/orders/track', (req, res) => {
+  try {
+    const body = (req.body ?? {}) as { reference?: unknown; email?: unknown; phone?: unknown };
+    const reference = typeof body.reference === 'string' ? body.reference.trim().toUpperCase() : '';
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+    if (!reference || (!email && !phone)) {
+      throw new HttpError(400, 'Enter your order reference and the email or phone you used.');
+    }
+    const order = getOrderByReference(reference);
+    const matched =
+      order &&
+      ((email && order.customerEmail.trim().toLowerCase() === email) ||
+        (phone && order.customerPhone.trim() === phone));
+    if (!order || !matched) throw new HttpError(404, 'We could not find an order with those details.');
+    const tracked: TrackedOrder = {
+      reference: order.reference,
+      createdAt: order.createdAt,
+      status: order.status,
+      customerName: order.customerName,
+      lines: order.lines,
+      total: order.total,
+      ...(order.discount !== undefined ? { discount: order.discount } : {}),
+      ...(order.couponCode !== undefined ? { couponCode: order.couponCode } : {}),
+      ...(order.payment
+        ? { paymentMethod: order.payment.method, paymentConfirmed: order.paymentConfirmed }
+        : {}),
+    };
+    res.json({ order: tracked });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// ---- reviews ---------------------------------------------------------------
+
+/** Public: approved reviews for one product, newest first. A shopper never
+ *  sees a review that has not been approved yet. */
+app.get('/api/products/:id/reviews', (req, res) => {
+  try {
+    const id = routeParam(req.params.id);
+    if (!getProduct(id)) throw new HttpError(404, 'That product no longer exists.');
+    const reviews = allReviews(id).filter((r) => r.status === 'approved');
+    res.json({ reviews });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Public: submit a review; it lands as `pending` until an admin approves it. */
+app.post('/api/products/:id/reviews', (req, res) => {
+  try {
+    const productId = routeParam(req.params.id);
+    if (!getProduct(productId)) throw new HttpError(404, 'That product no longer exists.');
+
+    const body = (req.body ?? {}) as Partial<ProductReview>;
+    const author = typeof body.author === 'string' ? body.author.trim() : '';
+    if (!author) throw new HttpError(400, 'Tell us your name.');
+    const comment = typeof body.comment === 'string' ? body.comment.trim() : '';
+    if (comment.length < 4) throw new HttpError(400, 'Please write a little more in your review.');
+    const rating = typeof body.rating === 'number' ? Math.round(body.rating) : NaN;
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      throw new HttpError(400, 'Choose a rating from 1 to 5 stars.');
+    }
+
+    const review: ProductReview = {
+      id: createId('review'),
+      productId,
+      author,
+      rating,
+      comment,
+      createdAt: Date.now(),
+      status: 'pending',
+    };
+    insertReview(review);
+    res.status(201).json({ review });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Public: approved-review aggregates for every product, so product cards can
+ *  show a star badge without one request per product. */
+app.get('/api/reviews/summary', (_req, res) => {
+  try {
+    res.json(reviewSummaries());
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Moderating reviews uses `orders.editRecords` — the same right that edits and
+ *  deletes order records — so a clerk who maintains records can also approve or
+ *  remove reviews. The UI hides the reviews moderation controls without it. */
+app.get('/api/reviews', requireAdmin, requirePermission('orders.editRecords'), (_req, res) => {
+  try {
+    res.json({ reviews: allReviews() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.put('/api/reviews/:id', requireAdmin, requirePermission('orders.editRecords'), (req, res) => {
+  try {
+    const id = routeParam(req.params.id);
+    const { status } = (req.body ?? {}) as { status?: unknown };
+    if (status !== 'pending' && status !== 'approved') {
+      throw new HttpError(400, 'A review can only be set to pending or approved.');
+    }
+    if (!updateReviewStatusRow(id, status)) {
+      throw new HttpError(404, 'That review no longer exists.');
+    }
+    res.json({ review: getReview(id) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+app.delete('/api/reviews/:id', requireAdmin, requirePermission('orders.editRecords'), (req, res) => {
+  try {
+    const id = routeParam(req.params.id);
+    if (!removeReview(id)) {
+      throw new HttpError(404, 'That review no longer exists.');
+    }
+    res.status(204).end();
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 
 // ---- import / reset ----------------------------------------------------------
 
