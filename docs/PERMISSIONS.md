@@ -28,9 +28,10 @@ so there are no surprises about what a role expands to later.
 | `products.manage` | Add, edit, publish and delete products | Product create/edit/delete |
 | `orders.view` | See orders and customer details | Orders tab |
 | `orders.manage` | Change order status and confirm payments | Status dropdown, payment tick/note |
-| `orders.editRecords` | Record offline orders, edit/delete order records | Admin order form, order edit/delete |
+| `orders.editRecords` | Record offline orders, edit/delete order records | Admin order form, order edit/delete, Reviews tab |
 | `settings.manage` | Change store details, colours, categories, contact | Store settings blocks |
 | `payments.manage` | Change payment methods, bank account, mobile money | Payments block |
+| `coupons.manage` | Create, edit, activate and remove discount codes | Coupons tab |
 | `database.view` | Browse the raw database records | Database tab |
 | `database.manage` | Integrity check, optimize, backup, purge orders | Database file tools |
 | `data.import` | Export the store and import a snapshot | Export / Import buttons |

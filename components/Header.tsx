@@ -57,7 +57,7 @@ const Header: React.FC<HeaderProps> = ({
     'w-full pl-9 pr-3 py-2 rounded-full bg-white/10 border border-white/20 text-sm text-brand-offwhite placeholder-brand-offwhite/50 focus:outline-none focus:ring-2 focus:ring-brand-gold';
 
   return (
-    <header className="bg-brand-dark text-brand-offwhite shadow-lg sticky top-0 z-50">
+    <header className="bg-brand-dark text-brand-offwhite shadow-lg sticky top-0 z-50 border-b border-white/10">
       {config.announcement && (
         <div className="bg-brand-gold text-brand-dark text-xs sm:text-sm font-semibold py-2 overflow-hidden">
           {/* One static copy for assistive tech; the scrolling track below is
@@ -103,13 +103,13 @@ const Header: React.FC<HeaderProps> = ({
             />
           </div>
 
-          <button onClick={() => navigate(View.Home)} className="hidden md:block hover:text-brand-gold transition-colors duration-300">
+          <button onClick={() => navigate(View.Home)} className="hidden md:block relative py-1 after:absolute after:left-0 after:-bottom-0.5 after:h-0.5 after:w-0 after:bg-brand-gold after:transition-all after:duration-300 hover:after:w-full hover:text-brand-gold transition-colors duration-300">
             Home
           </button>
 
           <button
             onClick={() => navigate(View.Cart)}
-            className="relative hover:text-brand-gold transition-colors duration-300"
+            className="relative hover:text-brand-gold hover:scale-110 transition-all duration-300"
             aria-label={`Cart, ${cartItemCount} item${cartItemCount === 1 ? '' : 's'}`}
           >
             <ShoppingCartIcon />

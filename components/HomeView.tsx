@@ -63,19 +63,42 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
 
   return (
     <div>
-      <section className="bg-brand-dark text-brand-offwhite">
-        <div className="container mx-auto px-4 sm:px-6 py-16 md:py-24 text-center">
-          <h2 className="text-4xl md:text-6xl font-display font-bold text-brand-gold">
+      <section className="relative overflow-hidden bg-brand-dark text-brand-offwhite">
+        {/* Layered ambient glows give the flat dark band depth without an image. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[42rem] h-[42rem] rounded-full bg-brand-gold/20 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-40 -right-24 w-[30rem] h-[30rem] rounded-full bg-brand-gold/10 blur-3xl"
+        />
+        <div className="relative container mx-auto px-4 sm:px-6 py-20 md:py-28 text-center">
+          <p className="fas-reveal is-visible text-xs font-semibold uppercase tracking-[0.35em] text-brand-gold-light mb-4">
+            Handcrafted with heritage
+          </p>
+          <h1 className="fas-gold-text font-display font-bold text-5xl sm:text-6xl md:text-7xl leading-[1.05]">
             {config.storeName}
-          </h2>
-          <p className="text-lg md:text-xl mt-4 text-brand-offwhite/80 max-w-2xl mx-auto">
+          </h1>
+          <p className="text-lg md:text-xl mt-6 text-brand-offwhite/80 max-w-2xl mx-auto">
             {config.tagline}
           </p>
+          <div className="mt-8 flex flex-wrap justify-center items-center gap-4">
+            <a
+              href="#catalog-filters"
+              className="inline-flex items-center justify-center gap-2 py-3 px-8 rounded-full text-sm font-bold text-brand-dark bg-brand-gold hover:bg-brand-gold-light hover:shadow-gold transition-all duration-300 hover:-translate-y-0.5"
+            >
+              Shop the collection
+            </a>
+            <span className="inline-flex items-center gap-2 py-3 px-8 rounded-full text-sm font-medium text-brand-offwhite/90 ring-1 ring-inset ring-brand-offwhite/20">
+              Shipped worldwide
+            </span>
+          </div>
         </div>
       </section>
 
       <div className="container mx-auto px-4 sm:px-6">
-        <Section title="Our Collection" subtitle={subtitle} />
+        <Section title="Our Collection" subtitle={subtitle} eyebrow="Curated for you" />
 
         {/* One unified filter bar for the whole grid: category, price and
             availability in a single row (the old category-pill row was folded
@@ -189,8 +212,8 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-16">
-            {visibleProducts.map((product) => (
-              <ProductCard key={product.id} product={product} onOpen={onOpenProduct} />
+            {visibleProducts.map((product, i) => (
+              <ProductCard key={product.id} product={product} onOpen={onOpenProduct} index={i} />
             ))}
           </div>
         )}

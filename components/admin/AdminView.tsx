@@ -14,8 +14,10 @@ import type { ProductDraft } from './ProductForm';
 import PaymentSettings from './PaymentSettings';
 import DatabasePanel from './DatabasePanel';
 import StaffPanel from './StaffPanel';
+import CouponPanel from './CouponPanel';
+import ReviewPanel from './ReviewPanel';
 
-type Tab = 'products' | 'orders' | 'settings' | 'database' | 'staff';
+type Tab = 'products' | 'orders' | 'settings' | 'coupons' | 'reviews' | 'database' | 'staff';
 
 /** Which right each tab needs. A tab the signed-in admin lacks is not rendered
  *  at all — the server enforces the same rule, this just avoids a dead end. */
@@ -23,6 +25,9 @@ const TAB_PERMISSION: Record<Tab, Permission> = {
   products: 'products.view',
   orders: 'orders.view',
   settings: 'settings.manage',
+  coupons: 'coupons.manage',
+  // Reviews are moderated with the same right that maintains order records.
+  reviews: 'orders.editRecords',
   database: 'database.view',
   staff: 'staff.manage',
 };
@@ -210,6 +215,8 @@ const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
             {t === 'products' ? `Products (${products.length})`
               : t === 'orders' ? `Orders (${orders.length})`
               : t === 'settings' ? 'Settings'
+              : t === 'coupons' ? 'Coupons'
+              : t === 'reviews' ? 'Reviews'
               : t === 'staff' ? 'Staff'
               : 'Database'}
             {t === 'orders' && pendingCount > 0 && (
@@ -680,6 +687,10 @@ const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
           </div>
         </div>
       )}
+
+      {tab === 'coupons' && <CouponPanel onNotice={flash} />}
+
+      {tab === 'reviews' && <ReviewPanel onNotice={flash} />}
 
       {tab === 'staff' && user && <StaffPanel user={user} onNotice={flash} />}
 

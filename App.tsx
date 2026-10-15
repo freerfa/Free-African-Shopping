@@ -11,6 +11,7 @@ import ProductDetail from './components/ProductDetail';
 import CartView from './components/CartView';
 import CheckoutView from './components/CheckoutView';
 import LoginView from './components/LoginView';
+import TrackOrderView from './components/TrackOrderView';
 import Spinner from './components/Spinner';
 import { formatPrice } from './lib/format';
 
@@ -48,6 +49,8 @@ const parseHash = (): RouteState => {
       return { view: View.Checkout, productId: null };
     case 'login':
       return { view: View.Login, productId: null };
+    case 'track':
+      return { view: View.TrackOrder, productId: null };
     case 'admin':
       return { view: View.Admin, productId: null };
     default:
@@ -66,6 +69,8 @@ const hashForRoute = (view: View, productId: string | null): string | null => {
       return '#/checkout';
     case View.Login:
       return '#/login';
+    case View.TrackOrder:
+      return '#/track';
     case View.Admin:
       return '#/admin';
     default:
@@ -162,6 +167,9 @@ const Storefront: React.FC = () => {
       case View.Login:
         document.title = `Sign in · ${config.storeName}`;
         break;
+      case View.TrackOrder:
+        document.title = `Track your order · ${config.storeName}`;
+        break;
       case View.Admin:
         document.title = `Admin · ${config.storeName}`;
         break;
@@ -169,6 +177,43 @@ const Storefront: React.FC = () => {
         document.title = config.storeName;
     }
   }, [view, selectedProduct, config.storeName]);
+
+  // Reveal-on-scroll: `.fas-reveal` starts hidden (index.css) and needs
+  // `.is-visible` to appear. One document-wide IntersectionObserver adds that
+  // class the first time each `[data-reveal]` element scrolls into view, then
+  // stops watching it. Observing the whole subtree means cards rendered later —
+  // by a search, a category filter or a view switch — are picked up too. Reduced
+  // motion is handled in CSS (elements are shown immediately, no observer cost).
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') {
+      document
+        .querySelectorAll<HTMLElement>('[data-reveal]')
+        .forEach((el) => el.classList.add('is-visible'));
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries, obs) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            obs.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -5% 0px' },
+    );
+    const watch = () =>
+      document.querySelectorAll<HTMLElement>('[data-reveal]:not(.is-visible)').forEach((el) => observer.observe(el));
+    watch();
+    // Cards mount after data loads / on route changes, so re-scan whenever the
+    // rendered products or view settle. Cheap: only new, not-yet-revealed nodes.
+    const mutation = new MutationObserver(watch);
+    mutation.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      mutation.disconnect();
+    };
+  }, [products, view]);
 
   const goHome = useCallback(() => {
     setView(View.Home);
@@ -251,6 +296,8 @@ const Storefront: React.FC = () => {
         )}
 
         {view === View.Login && <LoginView onDone={goHome} />}
+
+        {view === View.TrackOrder && <TrackOrderView onBack={goHome} />}
 
         {view === View.Admin && user?.isAdmin && (
           <React.Suspense
@@ -378,6 +425,17 @@ const Storefront: React.FC = () => {
                 >
                   Continue shopping
                 </button>
+                <div>
+                  <button
+                    onClick={() => {
+                      setPlacedOrder(null);
+                      setView(View.TrackOrder);
+                    }}
+                    className="mt-3 text-sm text-brand-gold-ink dark:text-brand-gold hover:underline"
+                  >
+                    Track this order &rarr;
+                  </button>
+                </div>
               </div>
             </div>
           </div>

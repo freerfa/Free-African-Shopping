@@ -83,9 +83,88 @@ price-on-enquiry listing (Services/Jobs) are rejected with 409.
 | `POST` | `/api/staff` | `staff.manage` | Create a staff account |
 | `PUT` | `/api/staff/:email` | `staff.manage` | Change rights and/or password |
 | `DELETE` | `/api/staff/:email` | `staff.manage` | Remove a staff account (signs them out) |
+| `GET` | `/api/coupons` | `coupons.manage` | List every discount code |
+| `POST` | `/api/coupons` | `coupons.manage` | Create a discount code |
+| `PUT` | `/api/coupons/:id` | `coupons.manage` | Edit a discount code (or pause it) |
+| `DELETE` | `/api/coupons/:id` | `coupons.manage` | Delete a discount code |
+| `GET` | `/api/reviews` | `orders.editRecords` | Every review, including pending |
+| `PUT` | `/api/reviews/:id` | `orders.editRecords` | Approve or hide a review |
+| `DELETE` | `/api/reviews/:id` | `orders.editRecords` | Delete a review |
 
 `POST /api/import` ignores any `adminPassword` in the uploaded file — credentials
 stay under server control.
+
+---
+
+## Coupons
+
+Discount codes managed in **Admin → Coupons**. A code is stored UPPERCASE so the
+shopper can type it in any case.
+
+```json
+{
+  "code": "SAVE10",
+  "kind": "percent | fixed",
+  "value": 10,
+  "minSubtotal": 0,
+  "expiresAt": 1735689600000,
+  "active": true
+}
+```
+
+- `percent` — `value` is a percentage of the subtotal, clamped to 0–100.
+- `fixed` — `value` is an amount in store currency; the discount never exceeds
+  the subtotal.
+- `minSubtotal` — the cart must reach this before the code applies (0 = none).
+- `expiresAt` — epoch ms, or `null` for "never expires".
+- `active` — an admin can park a code without deleting it.
+
+### `POST /api/coupons/validate` (public)
+
+Body `{ "code": "SAVE10", "subtotal": 5000 }`. Returns `{ "code", "discount }` on
+success; rejects with 400 and a shopper-facing reason (unknown, inactive,
+expired, or below the minimum). The checkout previews the discount with this, but
+**the server recomputes it when the order is placed** — the response here is
+advisory and never trusted for pricing.
+
+---
+
+## Order tracking
+
+### `POST /api/orders/track` (public)
+
+A shopper looks up their order by reference plus the email **or** phone they
+ordered with. Body `{ "reference": "FAS-000123", "email": "…", "phone": "…" }`
+(one of `email`/`phone` is required). Returns a `TrackedOrder` — a deliberate
+subset of the order (reference, status, customer name, lines, total, discount,
+payment method/confirmed). The address and the *other* contact detail are never
+echoed back.
+
+Both details must match, and a miss returns the same vague 404 for every failure
+so the endpoint cannot be used to enumerate which references exist.
+
+---
+
+## Reviews
+
+Customer reviews are **moderated**: a new submission is `pending` and only
+appears publicly once an admin approves it.
+
+### `GET /api/products/:id/reviews` (public)
+Approved reviews for one product, newest first.
+
+### `POST /api/products/:id/reviews` (public)
+Body `{ "author": "…", "rating": 1–5, "comment": "…" }`. Validates a name, a
+1–5 integer rating and a comment of at least 4 characters. The review is stored
+as `pending`.
+
+### `GET /api/reviews/summary` (public)
+`{ "<productId>": { "count": n, "average": x.x }, … }` — approved-review
+aggregates for every product, so cards can show a star badge without one request
+per product.
+
+Moderating (`GET`/`PUT`/`DELETE` `/api/reviews…`) requires `orders.editRecords` —
+the same right that edits order records. `PUT` takes `{ "status": "pending" | "approved" }`.
 
 ---
 

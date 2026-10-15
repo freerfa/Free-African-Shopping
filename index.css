@@ -48,6 +48,56 @@ body {
   outline-color: rgb(var(--color-gold));
 }
 
+/* Selection in the brand gold, so copy/paste feels on-brand. */
+::selection {
+  background: rgb(var(--color-gold) / 0.35);
+  color: rgb(var(--color-dark));
+}
+.dark ::selection {
+  color: rgb(var(--color-offwhite));
+}
+
+/*
+ * Reveal-on-scroll (IntersectionObserver adds .is-visible).
+ * Elements start hidden and shift up slightly, then settle — the subtle
+ * entrance modern storefronts use. Without JS (or before it runs) the element
+ * is simply hidden, which is a safe default; reduced motion skips the shift.
+ */
+.fas-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.fas-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fas-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Gradient gold text for hero/section headings. Uses the live brand golds so
+   it re-skins with the admin colour pickers. */
+.fas-gold-text {
+  background-image: linear-gradient(
+    100deg,
+    rgb(var(--color-gold-light)),
+    rgb(var(--color-gold)) 45%,
+    rgb(var(--color-gold-light))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* Truncation used by ProductCard. Declared explicitly so the card layout does
    not depend on which Tailwind build the CDN happens to serve. */
 .line-clamp-3 {

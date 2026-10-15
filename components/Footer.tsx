@@ -13,6 +13,8 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
   return (
     <footer className="bg-brand-dark text-brand-offwhite mt-auto">
+      {/* A thin gold rule caps the footer and ties it to the hero accents. */}
+      <div aria-hidden="true" className="h-1 w-full bg-gradient-to-r from-transparent via-brand-gold to-transparent" />
       <div className="container mx-auto px-4 sm:px-6 py-12">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           <div>
@@ -27,7 +29,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
           {categories.length > 0 && (
             <div>
-              <h4 className="font-semibold text-brand-gold mb-3">Shop</h4>
+              <h4 className="font-semibold text-brand-gold mb-3 uppercase tracking-wider text-sm">Shop</h4>
               <ul className="space-y-2">
                 {/* Every category is listed, not just the first few — the
                     Services and Jobs boards sit at the end of the list and were
@@ -42,7 +44,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           )}
 
           <div>
-            <h4 className="font-semibold text-brand-gold mb-3">Store</h4>
+            <h4 className="font-semibold text-brand-gold mb-3 uppercase tracking-wider text-sm">Store</h4>
             <ul className="space-y-2 text-sm">
               <li>
                 <button
@@ -60,6 +62,14 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   Your cart
                 </button>
               </li>
+              <li>
+                <button
+                  onClick={() => onNavigate(View.TrackOrder)}
+                  className="text-brand-offwhite/70 hover:text-brand-gold transition-colors"
+                >
+                  Track your order
+                </button>
+              </li>
               {user?.isAdmin && (
                 <li>
                   <button
@@ -74,7 +84,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           </div>
 
           <div>
-            <h4 className="font-semibold text-brand-gold mb-3">Contact</h4>
+            <h4 className="font-semibold text-brand-gold mb-3 uppercase tracking-wider text-sm">Contact</h4>
             <ul className="space-y-2 text-sm text-brand-offwhite/70">
               {config.contactEmail && (
                 <li>

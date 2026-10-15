@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Product } from '../types';
+import type { Product, ProductReview } from '../types';
 import { useStore } from '../contexts/StoreContext';
+import { api, ApiError } from '../lib/api';
 import { formatPrice, formatPriceOrEnquiry } from '../lib/format';
 import ProductCard from './ProductCard';
 import {
@@ -14,7 +15,7 @@ import {
   variantLabel,
 } from '../lib/product';
 import ContactUs from './ContactUs';
-import { goldButtonClass, Section } from './ui';
+import { goldButtonClass, inputClass, labelClass, Section, Stars, StarInput } from './ui';
 import ChevronRightIcon from './icons/ChevronRightIcon';
 
 interface ProductDetailProps {
@@ -25,10 +26,45 @@ interface ProductDetailProps {
 }
 
 const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, onOpen }) => {
-  const { config, products } = useStore();
+  const { config, products, reviewSummaries, refreshReviewSummaries } = useStore();
   const [activeImage, setActiveImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [selection, setSelection] = useState<Record<string, string>>({});
+
+  // Approved reviews for this product, plus the "leave a review" form state.
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [author, setAuthor] = useState('');
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewThanks, setReviewThanks] = useState(false);
+
+  // Approved reviews load per product; the aggregate badge comes from the
+  // shared `reviewSummaries` map so it matches the card without a second call.
+  useEffect(() => {
+    if (!product) return;
+    let cancelled = false;
+    setReviewsLoading(true);
+    setReviewThanks(false);
+    setReviewError('');
+    api
+      .getReviews(product.id)
+      .then((result) => {
+        if (!cancelled) setReviews(result.reviews);
+      })
+      .catch(() => {
+        // Non-fatal: the section simply shows no reviews if this fails.
+        if (!cancelled) setReviews([]);
+      })
+      .finally(() => {
+        if (!cancelled) setReviewsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product]);
 
   // Reset local state whenever a different product is opened.
   useEffect(() => {
@@ -64,6 +100,43 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
     return [...sameCategory, ...rest].slice(0, 4);
   }, [product, products]);
 
+  // Submit lands as `pending`; it only shows publicly once an admin approves it.
+  const summary = product ? reviewSummaries[product.id] : undefined;
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!product || submittingReview) return;
+    if (!author.trim()) {
+      setReviewError('Please tell us your name.');
+      return;
+    }
+    if (comment.trim().length < 4) {
+      setReviewError('Please write a little more in your review.');
+      return;
+    }
+    setSubmittingReview(true);
+    setReviewError('');
+    try {
+      await api.submitReview({
+        productId: product.id,
+        author: author.trim(),
+        rating,
+        comment: comment.trim(),
+      });
+      setReviewThanks(true);
+      setAuthor('');
+      setComment('');
+      setRating(5);
+      // The aggregate (average/count) will move once the review is approved;
+      // refresh so an immediately-approved review reflects at once.
+      void refreshReviewSummaries();
+    } catch (err) {
+      setReviewError(err instanceof ApiError ? err.message : 'Could not submit your review.');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   if (!product) {
     return (
       <div className="container mx-auto px-6 py-16 text-center">
@@ -94,12 +167,12 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
       </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
-        <div>
-          <div className="rounded-lg overflow-hidden shadow-xl bg-white dark:bg-dark-card">
+        <div className="lg:sticky lg:top-24 lg:self-start">
+          <div className="rounded-2xl overflow-hidden shadow-card ring-1 ring-black/5 dark:ring-white/10 bg-white dark:bg-dark-card group">
             <img
               src={images[activeImage] ?? images[0]}
               alt={product.name}
-              className="w-full h-72 sm:h-96 object-cover"
+              className="w-full h-80 sm:h-[28rem] object-cover transition-transform duration-700 ease-out group-hover:scale-105"
             />
           </div>
           {images.length > 1 && (
@@ -108,8 +181,10 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
                 <button
                   key={`${src}-${index}`}
                   onClick={() => setActiveImage(index)}
-                  className={`w-20 h-20 rounded-md overflow-hidden border-2 transition-colors ${
-                    index === activeImage ? 'border-brand-gold-ink dark:border-brand-gold' : 'border-transparent'
+                  className={`w-20 h-20 rounded-lg overflow-hidden ring-2 transition-all duration-200 hover:scale-105 hover:shadow-md ${
+                    index === activeImage
+                      ? 'ring-brand-gold-ink dark:ring-brand-gold'
+                      : 'ring-transparent hover:ring-gray-300 dark:hover:ring-dark-border'
                   }`}
                   aria-label={`View image ${index + 1}`}
                 >
@@ -126,8 +201,20 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
             {product.name}
           </h1>
 
-          <div className="flex flex-wrap items-baseline gap-3 mt-4">
-            <span className="text-3xl font-bold text-brand-dark dark:text-dark-text">
+          {/* Star-rating summary from the shared aggregates map. Only shown once
+              at least one review has been approved. */}
+          {summary && summary.count > 0 && (
+            <div className="flex items-center gap-2 mt-2">
+              <Stars rating={summary.average} size={18} />
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                {summary.average.toFixed(1)} out of 5 &middot; {summary.count} review
+                {summary.count === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-baseline gap-3 mt-4 pb-6 border-b dark:border-dark-border">
+            <span className="text-4xl font-bold text-brand-dark dark:text-dark-text">
               {formatPriceOrEnquiry(displayPrice, config.currency)}
             </span>
             {onSale && product.compareAtPrice !== null && (
@@ -233,6 +320,81 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
           </div>
         </section>
       )}
+
+      {/* Customer reviews: the approved list plus a moderated submit form. */}
+      <section className="mt-16 pt-10 border-t dark:border-dark-border">
+        <Section title="Customer reviews" />
+        <div className="max-w-3xl mx-auto space-y-8">
+          {reviewsLoading ? (
+            <p className="text-center text-gray-600 dark:text-gray-400">Loading reviews…</p>
+          ) : reviews.length === 0 ? (
+            <p className="text-center text-gray-600 dark:text-gray-400">
+              No reviews yet — be the first to share your thoughts.
+            </p>
+          ) : (
+            <ul className="space-y-5">
+              {reviews.map((review) => (
+                <li key={review.id} className="bg-white dark:bg-dark-card rounded-lg shadow p-5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Stars rating={review.rating} />
+                    <span className="font-semibold text-brand-dark dark:text-dark-text">{review.author}</span>
+                    <span className="text-xs text-gray-400">
+                      {new Date(review.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-300 mt-2 whitespace-pre-line">{review.comment}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form onSubmit={handleSubmitReview} className="bg-white dark:bg-dark-card rounded-lg shadow p-6 space-y-4">
+            <h3 className="text-lg font-bold text-brand-dark dark:text-dark-text">Leave a review</h3>
+            {reviewThanks && (
+              <p className="text-sm text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 p-3 rounded-md">
+                Thank you! Your review has been submitted and will appear once our team approves it.
+              </p>
+            )}
+            {reviewError && (
+              <p className="text-sm text-red-500 bg-red-100 dark:bg-red-900/50 dark:text-red-300 p-3 rounded-md">
+                {reviewError}
+              </p>
+            )}
+            <div>
+              <label className={labelClass} htmlFor="review-rating">Your rating</label>
+              <div className="mt-1">
+                <StarInput value={rating} onChange={setRating} />
+              </div>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="review-author">Your name</label>
+              <input
+                id="review-author"
+                type="text"
+                value={author}
+                onChange={(e) => setAuthor(e.target.value)}
+                className={inputClass}
+                placeholder="e.g. Amara O."
+                autoComplete="name"
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="review-comment">Your review</label>
+              <textarea
+                id="review-comment"
+                rows={4}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                className={inputClass}
+                placeholder="What did you think of this product?"
+              />
+            </div>
+            <button type="submit" disabled={submittingReview} className={goldButtonClass}>
+              {submittingReview ? 'Submitting…' : 'Submit review'}
+            </button>
+          </form>
+        </div>
+      </section>
     </div>
   );
 };

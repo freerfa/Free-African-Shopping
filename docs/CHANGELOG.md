@@ -8,6 +8,31 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-15 — Storefront polish: motion, hero, reviews/coupons UI
+
+- **Reveal-on-scroll** (`App.tsx` + `index.css`): `[data-reveal]` cards fade up
+  once via a document-wide IntersectionObserver; reduced motion shows them
+  immediately. New `fas-gold-text` gradient heading style follows the admin
+  colour pickers.
+- **Hero refresh** (`HomeView`): ambient gold glows, eyebrow line, gold gradient
+  store name, and Shop-the-collection / Track-order CTAs.
+- **Cards & detail** (`ProductCard`, `ProductDetail`): elevated card shadows,
+  hover lift, review stars/counts, coupon-aware pricing, shareable links.
+- **Checkout**: coupon apply field with live discount + subtotal/total math.
+- **New panels**: `TrackOrderView`, `CouponPanel`, `ReviewPanel` wired into
+  `App.tsx` routes (`#/track`), footer link, and the admin tabs.
+- **Theme tokens** (`tailwind.config.js`): card/card-hover/gold shadows,
+  fade-up/fade-in/shimmer keyframes used by the reveal system.
+- **Docs**: `docs/API.md` (coupons/reviews/track endpoints + guards),
+  `docs/PERMISSIONS.md` (`coupons.manage`, reviews under `orders.editRecords`).
+
+**Why:** finish the uncommitted UI side of the 2026-10-13 coupons/reviews/track
+release so the code on GitHub (and Render via auto-deploy) matches the local
+storefront. Typecheck + build clean; data itself syncs via the JSON export,
+not git (the SQLite file stays gitignored by design).
+
+---
+
 ## 2026-10-08 — Storefront filters: price range and availability
 
 - **New unified "Filters" bar** on the home grid: a **Category** dropdown, min/max

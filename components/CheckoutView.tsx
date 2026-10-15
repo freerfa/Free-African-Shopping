@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { Order, PaymentInfo, PaymentMethod } from '../types';
 import { useStore } from '../contexts/StoreContext';
+import { api, ApiError } from '../lib/api';
 import { formatPrice } from '../lib/format';
 import { primaryImage } from '../lib/product';
 import { checkoutShowsPayment, checkoutTakesOrders, enabledPaymentMethods, PAYMENT_METHOD_LABELS, usableWallets } from '../lib/payments';
@@ -31,6 +32,14 @@ const CheckoutView: React.FC<CheckoutViewProps> = ({ onDone, onBackToCart }) => 
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Coupon: the shopper types a code, we preview the discount against the live
+  // subtotal, and only the *code* is sent with the order — the server re-checks
+  // it and computes the real discount, so this preview is advisory only.
+  const [couponCode, setCouponCode] = useState('');
+  const [discount, setDiscount] = useState(0);
+  const [couponError, setCouponError] = useState('');
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+
   // The admin can switch a method off while a checkout is open, so fall back to
   // the first one still on offer instead of posting a method the server rejects.
   const activeMethod: PaymentMethod | undefined = methods.includes(method) ? method : methods[0];
@@ -46,6 +55,37 @@ const CheckoutView: React.FC<CheckoutViewProps> = ({ onDone, onBackToCart }) => 
     }
     if (option === 'mobileMoney') return 'Send from your phone to one of our wallets.';
     return payments.payOnDeliveryNote;
+  };
+
+  /** Apply a shopper-typed code. On success we stash the discount so the
+   *  summary updates; on failure the server's reason is shown verbatim. */
+  const handleApplyCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (applyingCoupon) return;
+    const code = couponCode.trim();
+    if (!code) {
+      setCouponError('Enter a discount code.');
+      return;
+    }
+    setApplyingCoupon(true);
+    setCouponError('');
+    try {
+      const result = await api.validateCoupon(code, cartSubtotal);
+      setDiscount(result.discount);
+      setCouponCode(result.code);
+    } catch (err) {
+      setDiscount(0);
+      setCouponError(err instanceof ApiError ? err.message : 'That code could not be applied.');
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
+  const clearCoupon = () => {
+    setCouponCode('');
+    setDiscount(0);
+    setCouponError('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -92,6 +132,8 @@ const CheckoutView: React.FC<CheckoutViewProps> = ({ onDone, onBackToCart }) => 
         phone: phone.trim(),
         address: address.trim(),
         payment,
+        // Only a code with a live discount preview travels; the server re-checks.
+        ...(discount > 0 ? { couponCode } : {}),
       });
       onDone(order);
     } catch (err) {
@@ -402,9 +444,64 @@ const CheckoutView: React.FC<CheckoutViewProps> = ({ onDone, onBackToCart }) => 
                 </span>
               </div>
             )}
-            <div className="flex justify-between text-lg font-bold pt-2">
+
+            {/* Coupon entry is its own <form> (a nested form is invalid HTML), so
+                applying a code never submits the order. */}
+            <div className="pt-4 border-t dark:border-dark-border">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-2" htmlFor="co-coupon">
+                Discount code
+              </label>
+              {discount > 0 ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                    {couponCode} applied
+                  </span>
+                  <button type="button" onClick={clearCoupon} className="text-xs text-gray-500 hover:text-red-600 underline">
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleApplyCoupon} className="flex gap-2">
+                  <input
+                    id="co-coupon"
+                    type="text"
+                    value={couponCode}
+                    onChange={(e) => setCouponCode(e.target.value)}
+                    className="flex-grow min-w-0 px-3 py-2 text-sm border border-gray-300 dark:border-dark-border rounded-md bg-transparent dark:text-dark-text uppercase"
+                    placeholder="SAVE10"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    disabled={applyingCoupon || !couponCode.trim()}
+                    className="px-4 py-2 rounded-md text-sm font-semibold bg-brand-dark text-white hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    {applyingCoupon ? '…' : 'Apply'}
+                  </button>
+                </form>
+              )}
+              {couponError && (
+                <p className="text-xs text-red-500 mt-2">{couponError}</p>
+              )}
+            </div>
+
+            {discount > 0 && (
+              <>
+                <div className="flex justify-between text-sm pt-2">
+                  <span className="text-gray-600 dark:text-gray-300">Subtotal</span>
+                  <span className="dark:text-dark-text">{formatPrice(cartSubtotal, config.currency)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-green-700 dark:text-green-400">
+                  <span>Discount</span>
+                  <span>&minus;{formatPrice(discount, config.currency)}</span>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between text-lg font-bold pt-2 border-t dark:border-dark-border">
               <span className="text-brand-dark dark:text-dark-text">Total</span>
-              <span className="text-brand-dark dark:text-dark-text">{formatPrice(cartSubtotal, config.currency)}</span>
+              <span className="text-brand-dark dark:text-dark-text">
+                {formatPrice(Math.max(0, cartSubtotal - discount), config.currency)}
+              </span>
             </div>
           </div>
         </div>
