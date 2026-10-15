@@ -245,7 +245,10 @@ export const api = {
     request<void>(`/api/staff/${encodeURIComponent(email)}`, { method: 'DELETE' }),
 
   importSnapshot: (snapshot: StoreSnapshot) =>
-    request<StoreData>('/api/import', { method: 'POST', body: snapshot }),
+    request<StoreData & { staffSync: { created: string[]; updated: string[]; skipped: string[] } }>('/api/import', { method: 'POST', body: snapshot }),
+  /** Full server-built snapshot: catalogue + coupons + reviews + staff
+   *  membership (never password hashes). */
+  exportSnapshot: () => request<StoreSnapshot>('/api/export'),
   reset: () => request<StoreData>('/api/reset', { method: 'POST' }),
 
   // ---- Admin → Database (database-file management) ------------------------

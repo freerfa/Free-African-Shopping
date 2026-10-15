@@ -19,7 +19,6 @@ import { chargeablePrice, isContactOnly } from '../lib/product';
 import { api } from '../lib/api';
 import {
   STORAGE_KEYS,
-  createSnapshot,
   downloadSnapshot,
   loadState,
   normalizeProducts,
@@ -101,7 +100,9 @@ interface StoreContextValue {
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => void;
 
-  exportStore: () => void;
+  /** Downloads the full server-built snapshot (catalogue + coupons + reviews +
+   *  staff membership). Rejects when the server refuses, so the panel reports. */
+  exportStore: () => Promise<void>;
   importStore: (file: File) => Promise<{ ok: boolean; message: string }>;
   resetToDefaults: () => Promise<void>;
   /** Purges every order from the database (Admin → Database). Resolves with
@@ -631,12 +632,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setOrders([]);
   }, []);
 
-  const exportStore = useCallback(() => {
-    const snapshot = createSnapshot(config, products, orders);
+  /** Downloads the full server-built snapshot: catalogue + coupons + reviews +
+   *  staff membership (email + rights — passwords never travel in a file). */
+  const exportStore = useCallback(async () => {
+    const snapshot = await api.exportSnapshot();
     const safeName =
       config.storeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    downloadSnapshot(snapshot, `${safeName || 'store'}-${new Date().toISOString().slice(0, 10)}.json`);
-  }, [config, products, orders]);
+    downloadSnapshot(snapshot, `${safeName || 'store'}-export-${new Date().toISOString().slice(0, 10)}.json`);
+  }, [config.storeName]);
 
   /** Applies a bulk server response that replaced config/products/orders
    *  wholesale (import and reset both return the stored, normalised result). */
@@ -658,13 +661,20 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (!result.ok) return { ok: false, message: result.error };
         const snapshot: StoreSnapshot = result.snapshot;
         // The server merges with defaults, validates and stores the snapshot;
-        // credentials found in the file are deliberately ignored.
+        // credentials found in the file are deliberately ignored. Staff arrives
+        // as membership only: existing logins keep working, new addresses land
+        // locked until the owner sets a password in Admin → Staff.
         const restored = await api.importSnapshot(snapshot);
         applyServerStore(restored);
         setCart([]);
+        const synced = restored.staffSync;
+        const staffBits = [
+          synced.created.length > 0 ? `${synced.created.length} staff added (${synced.created.join(', ')}) — set their passwords in Admin → Staff` : '',
+          synced.updated.length > 0 ? `${synced.updated.length} staff rights updated` : '',
+        ].filter(Boolean);
         return {
           ok: true,
-          message: `Loaded ${restored.products.length} product(s) into "${restored.config.storeName}".`,
+          message: `Loaded ${restored.products.length} product(s) into "${restored.config.storeName}".${staffBits.length > 0 ? ` ${staffBits.join('; ')}.` : ''}`,
         };
       } catch (error) {
         console.error('Import failed:', error);

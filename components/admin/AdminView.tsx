@@ -192,6 +192,17 @@ const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
     }
   };
 
+  // Export now downloads the server-built snapshot (catalogue + coupons +
+  // reviews + staff membership), so it can fail when the server refuses.
+  const handleExport = async () => {
+    try {
+      await exportStore();
+      flash(true, 'Store exported — coupons, reviews and staff membership are in the file.');
+    } catch (error) {
+      flash(false, error instanceof Error ? error.message : 'Could not export the store.');
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 sm:px-6 py-12">
       <Section title="Admin Panel" subtitle="Products, orders, store settings and your database records." />
@@ -644,7 +655,12 @@ const AdminView: React.FC<AdminViewProps> = ({ onExit }) => {
                   only appear for an account that holds the matching right. */}
               {can('data.import') && (
                 <>
-                  <button onClick={exportStore} className={smallButton}>Export store (JSON)</button>
+                  <button onClick={() => void handleExport()} className={smallButton}>Export store (JSON)</button>
+                  <p className="w-full text-xs text-gray-500 dark:text-gray-400">
+                    The file carries products, orders, coupons, reviews and staff emails + rights.
+                    Passwords never travel — a new address signs in only after you set its
+                    password in the Staff tab.
+                  </p>
 
                   <button onClick={() => fileInput.current?.click()} className={smallButton} disabled={importing}>
                     {importing ? 'Importing...' : 'Import store (JSON)'}

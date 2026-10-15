@@ -30,7 +30,7 @@ import type {
 import { ALL_PERMISSIONS } from '../types';
 import { PAYMENT_METHOD_LABELS, paymentMethodStatus } from '../lib/payments';
 import { couponDiscount, couponProblem, normalizeCouponCode } from '../lib/coupons';
-import { createId, normalizeProduct, normalizeProducts } from '../lib/storage';
+import { createId, normalizeCoupons, normalizeProduct, normalizeProducts, normalizeReviews, normalizeStaffSnapshot } from '../lib/storage';
 import { chargeablePrice } from '../lib/product';
 import {
   allCoupons,
@@ -57,8 +57,10 @@ import {
   removeOrder,
   removeProduct,
   removeReview,
+  replaceCoupons,
   replaceOrders,
   replaceProducts,
+  replaceReviews,
   reviewSummaries,
   seedProducts,
   setSetting,
@@ -85,6 +87,7 @@ import {
   recordLoginFailure,
   requireAdmin,
   requirePermission,
+  syncStaffMembership,
   tokenFrom,
   updateAdminCredentials,
   updateStaff,
@@ -1293,9 +1296,46 @@ app.delete('/api/reviews/:id', requireAdmin, requirePermission('orders.editRecor
 
 // ---- import / reset ----------------------------------------------------------
 
+/**
+ * Full snapshot built server-side: config + products + orders + coupons +
+ * reviews + staff MEMBERSHIP (email + rights, never password hashes). The
+ * admin export button calls this so the downloaded file actually carries the
+ * whole store — the client-side snapshot builder only ever sees the catalogue
+ * it has loaded and can never see the staff table.
+ */
+app.get('/api/export', requireAdmin, requirePermission('data.import'), (_req, res) => {
+  try {
+    const config = getSetting<StoreConfig>('config');
+    if (!config) throw new HttpError(500, 'Store settings are missing.');
+    const snapshot: StoreSnapshot = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      config: { ...config, adminPassword: '' },
+      products: allProducts(),
+      orders: allOrders(),
+      coupons: allCoupons(),
+      reviews: allReviews(),
+      staff: listStaff().map((m) => ({
+        email: m.email,
+        permissions: [...m.permissions],
+        createdAt: m.createdAt,
+      })),
+    };
+    res.json(snapshot);
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 /** Applies an uploaded snapshot wholesale, validating like the old client
  *  parser did. `adminPassword` found in the file is ignored — credentials
- *  stay under server control. */
+ *  stay under server control.
+ *
+ *  `coupons` / `reviews` replace their tables only when the key is PRESENT
+ *  (missing on old snapshots means "leave alone", never "wipe"). `staff`
+ *  upserts membership only — password hashes never travel in a file, so a new
+ *  address arrives locked until the owner sets a password, and an existing
+ *  login keeps signing in. */
 app.post('/api/import', requireAdmin, requirePermission('data.import'), (req, res) => {
   try {
     const snapshot = (req.body ?? {}) as Partial<StoreSnapshot>;
@@ -1334,17 +1374,33 @@ app.post('/api/import', requireAdmin, requirePermission('data.import'), (req, re
         typeof (o as Order).id === 'string' &&
         typeof (o as Order).reference === 'string',
     );
+    // Optional collections — normalised here so a hand-edited file cannot
+    // smuggle an invalid row past the table writers.
+    const coupons = snapshot.coupons !== undefined ? normalizeCoupons(snapshot.coupons) : null;
+    const reviews = snapshot.reviews !== undefined ? normalizeReviews(snapshot.reviews) : null;
+    const staff = snapshot.staff !== undefined ? normalizeStaffSnapshot(snapshot.staff) : null;
 
     db.transaction(() => {
       replaceProducts(products);
       replaceOrders(orders);
+      if (coupons !== null) replaceCoupons(coupons);
+      if (reviews !== null) replaceReviews(reviews);
       setSetting('config', config);
     })();
+    // Staff membership syncs outside the catalogue transaction: it touches a
+    // different table with its own transaction and its own no-delete rule.
+    const staffSync =
+      staff !== null
+        ? syncStaffMembership(
+            staff.map((s) => ({ email: s.email, permissions: [...s.permissions], createdAt: s.createdAt })),
+          )
+        : { created: [] as string[], updated: [] as string[], skipped: [] as string[] };
 
     res.json({
       config: { ...config, adminPassword: '' },
       products: allProducts(),
       orders: allOrders(),
+      staffSync,
     });
   } catch (error) {
     if (error instanceof Error && error.message.includes('UNIQUE constraint')) {

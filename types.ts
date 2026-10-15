@@ -399,11 +399,20 @@ export interface StorePayments {
   payOnDeliveryNote: string;
 }
 
-/** The shape written to and read from a `.json` export file. */
+/** The shape written to and read from a `.json` export file.
+ *
+ *  `staff` carries membership only (email + rights): password hashes never
+ *  leave the database in a file, so importing recreates the login with a fresh
+ *  temporary password the owner must share out-of-band and change on next
+ *  sign-in. Every collection stays optional so snapshots from older builds
+ *  still import. */
 export interface StoreSnapshot {
   version: 1;
   exportedAt: string;
   config: StoreConfig;
   products: Product[];
   orders: Order[];
+  coupons?: Coupon[];
+  reviews?: ProductReview[];
+  staff?: Pick<StaffMember, 'email' | 'permissions' | 'createdAt'>[];
 }

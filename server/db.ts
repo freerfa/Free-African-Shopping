@@ -292,7 +292,6 @@ export const allCoupons = (): Coupon[] =>
   (db.prepare('SELECT data FROM coupons').all() as { data: string }[])
     .map((row) => JSON.parse(row.data) as Coupon)
     .sort((a, b) => b.createdAt - a.createdAt);
-
 export const getCoupon = (id: string): Coupon | null => {
   const row = db.prepare('SELECT data FROM coupons WHERE id = ?').get(id) as
     | { data: string }
@@ -325,6 +324,19 @@ export const updateCouponRow = (coupon: Coupon): boolean =>
 
 export const removeCoupon = (id: string): boolean =>
   db.prepare('DELETE FROM coupons WHERE id = ?').run(id).changes > 0;
+
+/** Full-table coupon replacement for imports: wipes and re-inserts inside one
+ *  transaction so a half-written file can never strand the table. Codes are
+ *  stored UPPERCASE alongside the blob to keep the UNIQUE index honest. */
+export const replaceCoupons = (coupons: Coupon[]): void => {
+  const insert = db.prepare('INSERT INTO coupons (id, code, data) VALUES (?, ?, ?)');
+  db.transaction(() => {
+    db.prepare('DELETE FROM coupons').run();
+    for (const coupon of coupons) {
+      insert.run(coupon.id, coupon.code, JSON.stringify(coupon));
+    }
+  })();
+}
 
 // ---- reviews ---------------------------------------------------------------
 
@@ -365,6 +377,20 @@ export const updateReviewStatusRow = (id: string, status: ProductReview['status'
 
 export const removeReview = (id: string): boolean =>
   db.prepare('DELETE FROM reviews WHERE id = ?').run(id).changes > 0;
+
+/** Full-table review replacement for imports (status mirrored onto the indexed
+ *  column alongside the blob, exactly like single inserts). */
+export const replaceReviews = (reviews: ProductReview[]): void => {
+  const insert = db.prepare(
+    'INSERT INTO reviews (id, product_id, status, created_at, data) VALUES (?, ?, ?, ?, ?)',
+  );
+  db.transaction(() => {
+    db.prepare('DELETE FROM reviews').run();
+    for (const review of reviews) {
+      insert.run(review.id, review.productId, review.status, review.createdAt, JSON.stringify(review));
+    }
+  })();
+}
 
 /** Approved-review aggregates per product for the public card badges. */
 export const reviewSummaries = (): Record<string, { count: number; average: number }> => {

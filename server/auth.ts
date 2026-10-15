@@ -273,6 +273,56 @@ export const deleteStaff = (email: string): boolean => {
   return changes > 0;
 };
 
+/**
+ * Staff membership sync for imports: upserts email + rights, never passwords.
+ * An existing login keeps its hash (the person keeps signing in); a new
+ * address arrives with an UNUSABLE hash (`*`) so it cannot sign in until the
+ * owner sets a real password from Admin → Staff. Accounts missing from the
+ * snapshot are left alone — a partial export must never delete logins. The
+ * owner's address is skipped (it is not a staff row at all).
+ */
+export const syncStaffMembership = (
+  members: { email: string; permissions: Permission[]; createdAt: number }[],
+): { created: string[]; updated: string[]; skipped: string[] } => {
+  const created: string[] = [];
+  const updated: string[] = [];
+  const skipped: string[] = [];
+  const upsert = db.transaction(
+    (list: { email: string; permissions: Permission[]; createdAt: number }[]) => {
+      for (const member of list) {
+        const email = member.email.trim().toLowerCase();
+        if (isOwnerEmail(email)) {
+          skipped.push(email);
+          continue;
+        }
+        const permissions = cleanPermissions(member.permissions);
+        if (permissions.length === 0) {
+          skipped.push(email);
+          continue;
+        }
+        const existing = readStaffRow(email);
+        if (!existing) {
+          db.prepare(
+            'INSERT INTO staff (email, salt, hash, permissions, created_at) VALUES (?, ?, ?, ?, ?)',
+          ).run(email, '*', '*', JSON.stringify(permissions), member.createdAt);
+          created.push(email);
+        } else if (JSON.stringify(cleanPermissions(safeParse(existing.permissions))) !== JSON.stringify(permissions)) {
+          db.prepare('UPDATE staff SET permissions = ? WHERE email = ?').run(
+            JSON.stringify(permissions),
+            email,
+          );
+          // Rights changed remotely: drop live sessions so the new limits apply
+          // at once, mirroring the single-edit route.
+          destroySessionsFor(email);
+          updated.push(email);
+        }
+      }
+    },
+  );
+  upsert(members);
+  return { created, updated, skipped };
+};
+
 /** Signing someone out everywhere — used when their rights shrink or their
  *  account is removed, so a change takes effect immediately rather than when
  *  their current token happens to expire. */

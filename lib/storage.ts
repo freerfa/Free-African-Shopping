@@ -1,4 +1,5 @@
-import type { Order, Product, StoreConfig, StoreSnapshot } from '../types';
+import type { Coupon, Order, Permission, Product, ProductReview, StaffMember, StoreConfig, StoreSnapshot } from '../types';
+import { ALL_PERMISSIONS } from '../types';
 
 const PREFIX = 'fas:';
 
@@ -48,12 +49,19 @@ export const createSnapshot = (
   config: StoreConfig,
   products: Product[],
   orders: Order[],
+  extra?: Pick<StoreSnapshot, 'coupons' | 'reviews' | 'staff'>,
 ): StoreSnapshot => ({
   version: 1,
   exportedAt: new Date().toISOString(),
   config,
   products,
   orders,
+  // Optional collections travel when the caller supplies them (server exports
+  // do); old import paths that only pass three args still produce the legacy
+  // shape. `staff` is membership only — never a password hash.
+  ...(extra?.coupons !== undefined ? { coupons: extra.coupons } : {}),
+  ...(extra?.reviews !== undefined ? { reviews: extra.reviews } : {}),
+  ...(extra?.staff !== undefined ? { staff: extra.staff } : {}),
 });
 
 export const downloadSnapshot = (snapshot: StoreSnapshot, filename: string): void => {
@@ -151,6 +159,87 @@ const isProductArray = (value: unknown): value is Product[] =>
       (typeof p.price === 'number' || p.price === null),
   );
 
+/** Repairs a coupon from a snapshot; unknown/invalid rows are dropped, never healed. */
+export const normalizeCoupons = (list: unknown): Coupon[] => {
+  if (!Array.isArray(list)) return [];
+  const out: Coupon[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const c = raw as Partial<Coupon>;
+    if (typeof c.id !== 'string' || !c.id) continue;
+    if (typeof c.code !== 'string' || !c.code.trim()) continue;
+    if (c.kind !== 'percent' && c.kind !== 'fixed') continue;
+    if (typeof c.value !== 'number' || !Number.isFinite(c.value) || c.value <= 0) continue;
+    out.push({
+      id: c.id,
+      code: c.code.trim().toUpperCase(),
+      kind: c.kind,
+      value: c.value,
+      minSubtotal: typeof c.minSubtotal === 'number' && c.minSubtotal >= 0 ? c.minSubtotal : 0,
+      expiresAt: typeof c.expiresAt === 'number' ? c.expiresAt : null,
+      active: c.active !== false,
+      createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now(),
+    });
+  }
+  return out;
+};
+
+/** Repairs reviews from a snapshot; corrupt rows are dropped. */
+export const normalizeReviews = (list: unknown): ProductReview[] => {
+  if (!Array.isArray(list)) return [];
+  const out: ProductReview[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Partial<ProductReview>;
+    if (typeof r.id !== 'string' || !r.id) continue;
+    if (typeof r.productId !== 'string' || !r.productId) continue;
+    if (r.status !== 'pending' && r.status !== 'approved') continue;
+    out.push({
+      id: r.id,
+      productId: r.productId,
+      author: typeof r.author === 'string' ? r.author : 'Anonymous',
+      rating: typeof r.rating === 'number' && r.rating >= 1 && r.rating <= 5 ? Math.round(r.rating) : 5,
+      comment: typeof r.comment === 'string' ? r.comment : '',
+      status: r.status,
+      createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
+    });
+  }
+  return out;
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Repairs staff membership from a snapshot (email + rights only — a snapshot
+ *  never carries a password hash, so imports must set a fresh password). */
+export const normalizeStaffSnapshot = (
+  list: unknown,
+): Pick<StaffMember, 'email' | 'permissions' | 'createdAt'>[] => {
+  if (!Array.isArray(list)) return [];
+  const out: Pick<StaffMember, 'email' | 'permissions' | 'createdAt'>[] = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const s = raw as { email?: unknown; permissions?: unknown; createdAt?: unknown };
+    if (typeof s.email !== 'string') continue;
+    const email = s.email.trim().toLowerCase();
+    if (!EMAIL_RE.test(email) || seen.has(email)) continue;
+    seen.add(email);
+    const permissions = Array.isArray(s.permissions)
+      ? (s.permissions.filter((p): p is Permission => typeof p === 'string' && (ALL_PERMISSIONS as readonly string[]).includes(p)) as Permission[])
+      : [];
+    // Unknown strings are dropped (same rule as the server); a member with no
+    // surviving rights is skipped so an import can never create an account that
+    // cannot sign in.
+    if (permissions.length === 0) continue;
+    out.push({
+      email,
+      permissions,
+      createdAt: typeof s.createdAt === 'number' ? s.createdAt : Date.now(),
+    });
+  }
+  return out;
+};
+
 /** Returns the snapshot, or a human-readable reason for rejecting it. */
 export const parseSnapshot = (raw: string): { ok: true; snapshot: StoreSnapshot } | { ok: false; error: string } => {
   let parsed: unknown;
@@ -176,6 +265,11 @@ export const parseSnapshot = (raw: string): { ok: true; snapshot: StoreSnapshot 
       config: candidate.config,
       products: normalizeProducts(candidate.products),
       orders: Array.isArray(candidate.orders) ? candidate.orders : [],
+      // Optional collections: missing on pre-change snapshots means "no data",
+      // which imports as "leave the target table alone" (never "wipe it").
+      ...(candidate.coupons !== undefined ? { coupons: normalizeCoupons(candidate.coupons) } : {}),
+      ...(candidate.reviews !== undefined ? { reviews: normalizeReviews(candidate.reviews) } : {}),
+      ...(candidate.staff !== undefined ? { staff: normalizeStaffSnapshot(candidate.staff) } : {}),
     },
   };
 };
