@@ -134,9 +134,8 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
       <div className="container mx-auto px-4 sm:px-6">
         <Section title="Our Collection" subtitle={subtitle} eyebrow="Curated for you" />
 
-        {/* One unified filter bar for the whole grid: category, price and
-            availability in a single row (the old category-pill row was folded
-            in here). Local state: leaving Home resets it, Clear resets all. */}
+        {/* Price and availability filters; categories live in the pill strip
+            above. Local state: leaving Home resets it, Clear resets all. */}
         <div
           id="catalog-filters"
           className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 mb-10 text-sm scroll-mt-32"

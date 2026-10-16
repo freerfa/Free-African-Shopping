@@ -202,7 +202,7 @@ const CheckoutView: React.FC<CheckoutViewProps> = ({ onDone, onBackToCart }) => 
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className={inputClass}
-              placeholder="+234 801 234 5678"
+              placeholder="+211 9xx xxx xxx"
               required
             />
           </div>

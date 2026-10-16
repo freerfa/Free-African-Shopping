@@ -33,46 +33,47 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 })
         data-reveal
         style={{ transitionDelay: `${Math.min(index, 7) * 60}ms` }}
       >
-        <ProductCardSurface className="h-full flex flex-col fas-card-bg">
-          <button
-            onClick={() => onOpen(product.id)}
-            className="relative block w-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand-gold-ink dark:focus:ring-brand-gold"
-            aria-label={`View ${product.name}`}
-          >
-            <div className="relative w-full h-64 bg-brand-offwhite dark:bg-dark-card overflow-hidden">
+        <ProductCardSurface className="h-full flex flex-col">
+          {/* Floating badges/wishlist sit as siblings of the image button —
+              nesting one <button> inside another is invalid HTML and confuses
+              screen readers. The relative wrapper anchors them to the image,
+              and pointer-events-none keeps badges from intercepting clicks. */}
+          <div className="relative">
+            <button
+              onClick={() => onOpen(product.id)}
+              className="block w-full bg-brand-offwhite dark:bg-dark-card overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand-gold-ink dark:focus:ring-brand-gold"
+              aria-label={`View ${product.name}`}
+            >
               <img
-                className={`w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 ${soldOut ? 'opacity-60 grayscale' : ''}`}
+                className={`w-full h-64 object-cover transition-transform duration-700 ease-out group-hover:scale-105 ${soldOut ? 'opacity-60 grayscale' : ''}`}
                 src={primaryImage(product)}
                 alt={product.name}
                 loading="lazy"
               />
+            </button>
             {onSale && (
-              <span className="absolute top-3 left-3 bg-brand-gold text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm hover:shadow-gold transition-shadow duration-300">
+              <span className="absolute top-3 left-3 z-10 bg-brand-gold text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm pointer-events-none">
                 SALE
               </span>
             )}
             {soldOut && (
-              <span className="absolute top-3 right-3 bg-brand-dark text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg z-10">
+              <span className="absolute top-3 right-3 z-10 bg-brand-dark text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg pointer-events-none">
                 SOLD OUT
               </span>
             )}
             {!soldOut && lowStock && !onSale && (
-              <span className="absolute top-3 right-3 bg-brand-gold-light text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm z-10">
+              <span className="absolute top-3 right-3 z-10 bg-brand-gold-light text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm pointer-events-none">
                 Only {remaining} left
               </span>
             )}
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleWishlist(product.id);
-              }}
-              className="absolute bottom-3 right-3 p-2.5 bg-white/90 dark:bg-black/50 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform z-10"
-              aria-label={wishlist.includes(product.id) ? "Remove from wishlist" : "Add to wishlist"}
+              onClick={() => toggleWishlist(product.id)}
+              className="absolute bottom-3 right-3 z-10 p-2.5 bg-white/90 dark:bg-black/50 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform"
+              aria-label={wishlist.includes(product.id) ? 'Remove from wishlist' : 'Add to wishlist'}
             >
               <HeartIcon filled={wishlist.includes(product.id)} />
-              </button>
-            </div>
-          </button>
+            </button>
+          </div>
 
           <div className="p-6 sm:p-7 flex-grow flex flex-col">
             <p className="text-xs font-semibold text-brand-gold-ink dark:text-brand-gold mb-2 uppercase tracking-wider">{product.category}</p>

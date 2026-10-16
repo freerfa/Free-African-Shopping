@@ -153,17 +153,17 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-center">
             <div className="flex flex-col items-center gap-3">
               <span className="w-10 h-10 rounded-full bg-brand-gold/10 flex items-center justify-center text-brand-gold">🔒</span>
-              <p className="text-sm font-medium text-brand-dark dark:text-dark-text">Secure payments</p>
+              <p className="text-sm font-medium text-brand-offwhite">Secure payments</p>
               <p className="text-xs text-brand-offwhite/50">Offline processing, no card data stored</p>
             </div>
             <div className="flex flex-col items-center gap-3">
               <span className="w-10 h-10 rounded-full bg-brand-gold/10 flex items-center justify-center text-brand-gold">🚚</span>
-              <p className="text-sm font-medium text-brand-dark dark:text-dark-text">Reliable delivery</p>
+              <p className="text-sm font-medium text-brand-offwhite">Reliable delivery</p>
               <p className="text-xs text-brand-offwhite/50">Track your order anytime</p>
             </div>
             <div className="flex flex-col items-center gap-3">
               <span className="w-10 h-10 rounded-full bg-brand-gold/10 flex items-center justify-center text-brand-gold">📞</span>
-              <p className="text-sm font-medium text-brand-dark dark:text-dark-text">Dedicated support</p>
+              <p className="text-sm font-medium text-brand-offwhite">Dedicated support</p>
               <p className="text-xs text-brand-offwhite/50">We're here to help</p>
             </div>
           </div>
@@ -173,7 +173,7 @@ const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
       {/* Newsletter signup — keep shoppers connected. */}
       <div className="bg-brand-gold/5 border-t border-brand-gold/10 relative z-10">
         <div className="container mx-auto px-4 sm:px-6 py-14 text-center">
-          <h3 className="text-2xl font-bold text-brand-dark dark:text-dark-text mb-3">Stay in the loop</h3>
+          <h3 className="text-2xl font-bold text-brand-offwhite mb-3">Stay in the loop</h3>
           <p className="text-brand-offwhite/70 text-sm max-w-md mx-auto mb-8">Get early access to new arrivals, special offers, and store news.</p>
           <form onSubmit={(e) => { e.preventDefault(); setSubscribed(true); }} className="max-w-sm mx-auto flex flex-col sm:flex-row gap-3">
             <input
