@@ -21,7 +21,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Poppins', 'sans-serif'],
+        sans: ['Poppins', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
         display: ['Tangerine', 'cursive'],
       },
       colors: {
@@ -34,22 +34,27 @@ export default {
         'brand-dark': 'rgb(var(--color-dark) / <alpha-value>)',
         'brand-offwhite': 'rgb(var(--color-offwhite) / <alpha-value>)',
         'dark-bg': '#121212',
-        'dark-card': '#1e1e1e',
+        'dark-card': '#1a1a1a',
         'dark-text': '#EAEAEA',
-        'dark-border': '#444444',
+        'dark-border': '#333333',
       },
-      // Layered, soft shadows give cards a premium "elevated" feel in both
-      // themes; the gold glow is used on primary CTAs for a warm accent.
+      // Layered shadows give cards a premium elevated feel; gold glow on CTAs.
       boxShadow: {
-        card: '0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.18)',
-        'card-hover': '0 8px 16px -8px rgb(0 0 0 / 0.20), 0 24px 48px -20px rgb(0 0 0 / 0.30)',
-        gold: '0 10px 30px -10px rgb(var(--color-gold) / 0.55)',
-        'gold-sm': '0 4px 14px -6px rgb(var(--color-gold) / 0.55)',
+        card: '0 1px 3px rgb(0 0 0 / 0.08), 0 4px 20px -8px rgb(0 0 0 / 0.06)',
+        'card-hover': '0 12px 32px -12px rgb(0 0 0 / 0.12), 0 4px 16px -8px rgb(0 0 0 / 0.10)',
+        gold: '0 12px 32px -8px rgb(var(--color-gold) / 0.45)',
+        'gold-sm': '0 4px 14px -6px rgb(var(--color-gold) / 0.45)',
+      },
+      borderRadius: {
+        'xl': '16px',
+        '2xl': '24px',
+        '3xl': '32px',
+        'full': '9999px',
       },
       keyframes: {
         // Cards/sections rise and fade in as they enter view (see .fas-reveal).
         'fade-up': {
-          '0%': { opacity: '0', transform: 'translateY(18px)' },
+          '0%': { opacity: '0', transform: 'translateY(20px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         'fade-in': {
@@ -61,10 +66,25 @@ export default {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
         },
+        // Subtle float for hero elements.
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-12px)' },
+        },
+        // Gentle scale pulse for featured badges.
+        'pulse-soft': {
+          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+          '50%': { transform: 'scale(1.03)', opacity: '0.85' },
+        },
       },
       animation: {
-        'fade-up': 'fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
-        'fade-in': 'fade-in 0.7s ease-out both',
+        'fade-up': 'fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'fade-in': 'fade-in 0.8s ease-out both',
+        'float': 'float 6s ease-in-out infinite',
+        'pulse-soft': 'pulse-soft 4s ease-in-out infinite',
+      },
+      backdropBlur: {
+        xs: '2px',
       },
     },
   },

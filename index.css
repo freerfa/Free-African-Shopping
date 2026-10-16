@@ -4,6 +4,11 @@
    styles can still override utilities where they need to. */
 @import "tailwindcss";
 
+/* Tailwind v4 does not auto-load JS config files — without this directive the
+   brand colors (bg-brand-gold …), darkMode:'class', font-display and shadow
+   tokens in tailwind.config.js are silently dropped from the build. */
+@config "./tailwind.config.js";
+
 /*
  * Runtime theming
  * ---------------
@@ -32,6 +37,72 @@ body {
   font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Modern clean body backgrounds ──
+   Light mode: warm off-white with a soft gold vignette and a very subtle diagonal gradient.
+   Dark mode: deep charcoal with layered gold glows for depth. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 50% 40%, rgb(var(--color-gold) / 0.06) 0%, transparent 60%),
+    linear-gradient(135deg, rgb(var(--color-offwhite)) 0%, rgb(250 248 240) 55%, rgb(var(--color-gold-light) / 0.04) 100%);
+  background-blend-mode: normal;
+}
+.dark body::before {
+  background:
+    radial-gradient(circle at 30% 30%, rgb(var(--color-gold) / 0.10) 0%, transparent 45%),
+    radial-gradient(circle at 70% 70%, rgba(255, 255, 255, 0.02) 0%, transparent 45%),
+    linear-gradient(135deg, #121212 0%, #1a1a1a 100%);
+}
+
+/* ── Premium card backgrounds with soft gold sheen ── */
+.fas-card-bg {
+  background: linear-gradient(
+    135deg,
+    rgb(var(--color-offwhite)) 0%,
+    rgb(255 255 255) 55%,
+    rgb(var(--color-gold-light) / 0.06) 100%
+  );
+}
+.dark .fas-card-bg {
+  background: linear-gradient(
+    135deg,
+    #1a1a1a 0%,
+    #222222 55%,
+    rgb(var(--color-gold) / 0.03) 100%
+  );
+}
+
+/* Section divider — a thin gold line that fades in and out. */
+.fas-divider {
+  position: relative;
+  overflow: hidden;
+}
+.fas-divider::after {
+  content: '';
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--color-gold) / 0.5),
+    transparent
+  );
+}
+.dark .fas-divider::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--color-gold) / 0.35),
+    transparent
+  );
 }
 
 /* Visible focus for keyboard users, without boxing in ordinary mouse clicks. */
@@ -63,10 +134,10 @@ body {
  */
 .fas-reveal {
   opacity: 0;
-  transform: translateY(18px);
+  transform: translateY(24px);
   transition:
-    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: opacity, transform;
 }
 .fas-reveal.is-visible {

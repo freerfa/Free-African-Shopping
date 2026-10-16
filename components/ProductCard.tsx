@@ -6,6 +6,7 @@ import { isContactOnly, isOnSale, isSoldOut, primaryImage, totalStock } from '..
 import ContactUs from './ContactUs';
 import ShoppingCartIcon from './icons/ShoppingCartIcon';
 import { HeartIcon } from './icons/HeartIcon';
+import { ProductCardSurface } from './ui';
 
 interface ProductCardProps {
   product: Product;
@@ -32,30 +33,31 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 })
         data-reveal
         style={{ transitionDelay: `${Math.min(index, 7) * 60}ms` }}
       >
-        <div className="h-full bg-white dark:bg-dark-card rounded-2xl shadow-card hover:shadow-card-hover ring-1 ring-black/5 dark:ring-white/10 overflow-hidden transition-all duration-300 lg:hover:-translate-y-1.5 flex flex-col">
+        <ProductCardSurface className="h-full flex flex-col fas-card-bg">
           <button
             onClick={() => onOpen(product.id)}
             className="relative block w-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand-gold-ink dark:focus:ring-brand-gold"
             aria-label={`View ${product.name}`}
           >
-            <img
-              className={`w-full h-64 object-cover transition-transform duration-700 ease-out group-hover:scale-[1.06] ${soldOut ? 'opacity-50' : ''}`}
-              src={primaryImage(product)}
-              alt={product.name}
-              loading="lazy"
-            />
+            <div className="relative w-full h-64 bg-brand-offwhite dark:bg-dark-card overflow-hidden">
+              <img
+                className={`w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 ${soldOut ? 'opacity-60 grayscale' : ''}`}
+                src={primaryImage(product)}
+                alt={product.name}
+                loading="lazy"
+              />
             {onSale && (
-              <span className="absolute top-3 left-3 bg-brand-gold text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm">
+              <span className="absolute top-3 left-3 bg-brand-gold text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm hover:shadow-gold transition-shadow duration-300">
                 SALE
               </span>
             )}
             {soldOut && (
-              <span className="absolute top-3 right-3 bg-brand-dark text-brand-offwhite text-xs font-bold px-2.5 py-1 rounded-full">
+              <span className="absolute top-3 right-3 bg-brand-dark text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg z-10">
                 SOLD OUT
               </span>
             )}
             {!soldOut && lowStock && !onSale && (
-              <span className="absolute top-3 right-3 bg-brand-dark text-brand-offwhite text-xs font-bold px-2.5 py-1 rounded-full">
+              <span className="absolute top-3 right-3 bg-brand-gold-light text-brand-dark text-xs font-bold px-2.5 py-1 rounded-full shadow-gold-sm z-10">
                 Only {remaining} left
               </span>
             )}
@@ -64,29 +66,30 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 })
                 e.stopPropagation();
                 toggleWishlist(product.id);
               }}
-              className="absolute bottom-3 right-3 p-2 bg-white/80 dark:bg-black/40 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform z-10"
+              className="absolute bottom-3 right-3 p-2.5 bg-white/90 dark:bg-black/50 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform z-10"
               aria-label={wishlist.includes(product.id) ? "Remove from wishlist" : "Add to wishlist"}
             >
               <HeartIcon filled={wishlist.includes(product.id)} />
-            </button>
+              </button>
+            </div>
           </button>
 
-          <div className="p-5 sm:p-6 flex-grow flex flex-col">
-            <p className="text-xs font-semibold text-brand-gold-ink dark:text-brand-gold mb-1.5 uppercase tracking-wider">{product.category}</p>
+          <div className="p-6 sm:p-7 flex-grow flex flex-col">
+            <p className="text-xs font-semibold text-brand-gold-ink dark:text-brand-gold mb-2 uppercase tracking-wider">{product.category}</p>
             <button onClick={() => onOpen(product.id)} className="text-left focus:outline-none">
-              <h3 className="text-lg sm:text-xl font-semibold text-brand-dark dark:text-dark-text mb-2 hover:text-brand-gold-ink dark:hover:text-brand-gold transition-colors">
+              <h3 className="text-lg sm:text-xl font-semibold text-brand-dark dark:text-dark-text mb-2.5 hover:text-brand-gold dark:hover:text-brand-gold transition-colors line-clamp-2">
                 {product.name}
               </h3>
             </button>
-            <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 flex-grow line-clamp-3">
+            <p className="text-gray-600 dark:text-gray-400 text-sm mb-5 flex-grow line-clamp-2">
               {product.description}
             </p>
 
-            <div className="flex flex-wrap justify-between items-center gap-3 pt-3 mt-auto border-t border-gray-100 dark:border-white/5">
-              <p className="text-2xl font-bold text-brand-dark dark:text-dark-text">
+            <div className="flex flex-wrap justify-between items-center gap-3 pt-4 mt-auto border-t border-gray-100 dark:border-dark-border">
+              <p className="text-2xl sm:text-2xl font-bold text-brand-dark dark:text-dark-text">
                 {formatPriceOrEnquiry(product.price, config.currency)}
                 {onSale && product.compareAtPrice !== null && (
-                  <span className="text-base font-normal text-gray-400 line-through ml-2">
+                  <span className="text-sm font-normal text-gray-400 line-through ml-2">
                     {formatPrice(product.compareAtPrice, config.currency)}
                   </span>
                 )}
@@ -99,15 +102,15 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 })
                 <button
                   onClick={() => addToCart(product.id, null, 1)}
                   disabled={soldOut}
-                  className="bg-brand-dark text-white py-2 px-4 rounded-full hover:bg-gray-800 dark:hover:bg-gray-700 hover:shadow-gold-sm transition-all duration-300 flex items-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="flex-1 min-w-[120px] bg-brand-dark text-white py-3 px-4 rounded-full hover:bg-gray-800 dark:hover:bg-gray-700 hover:shadow-gold-sm shadow-gold-sm transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm font-medium"
                 >
-                  <ShoppingCartIcon />
-                  <span>{soldOut ? 'Sold out' : 'Add'}</span>
+                  <ShoppingCartIcon className="w-4 h-4" />
+                  <span>{soldOut ? 'Sold out' : 'Add to cart'}</span>
                 </button>
               )}
             </div>
           </div>
-        </div>
+        </ProductCardSurface>
       </div>
     </div>
   );

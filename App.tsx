@@ -90,6 +90,14 @@ const Storefront: React.FC = () => {
   const { user, config, products, cartCount, addToCart, logout } = useStore();
   const { toast } = useToast();
 
+  // Show the Back to Top button once the user has scrolled past the first viewport.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > window.innerHeight);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   // The initial view comes from the URL, so a shared `#/product/…` link opens
   // the right page on the very first render.
   const [view, setView] = useState<View>(INITIAL_ROUTE.view);
@@ -254,7 +262,15 @@ const Storefront: React.FC = () => {
   }, [logout]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-brand-offwhite dark:bg-dark-bg transition-colors duration-300">
+    <div className="min-h-screen flex flex-col bg-brand-offwhite dark:bg-dark-bg transition-colors duration-300 relative">
+      {/* Skip to content — accessibility standard for keyboard users. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-brand-gold focus:text-brand-dark focus:rounded-md focus:font-semibold"
+      >
+        Skip to content
+      </a>
+
       <Header
         user={user}
         cartItemCount={cartCount}
@@ -264,7 +280,7 @@ const Storefront: React.FC = () => {
         onSearchChange={handleSearchChange}
       />
 
-      <main className="flex-grow">
+      <main id="main-content" className="flex-grow">
         {view === View.Home && (
           <HomeView searchQuery={searchQuery} onOpenProduct={openProduct} />
         )}
@@ -456,6 +472,15 @@ const Storefront: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Back to top — sticky on long pages (product detail, home). */}
+      <button
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className={`fixed bottom-6 right-6 z-40 bg-brand-gold text-brand-dark rounded-full p-3 shadow-card-hover hover:bg-brand-gold-light hover:scale-105 transition-all duration-300 ${scrolled ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-20'}`}
+        aria-label="Back to top"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 12 2 6 6"></polyline><polyline points="18 18 12 22 6 18"></polyline></svg>
+      </button>
 
       <Footer onNavigate={setView} />
     </div>

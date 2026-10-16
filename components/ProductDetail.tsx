@@ -173,7 +173,7 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
             <img
               src={images[activeImage] ?? images[0]}
               alt={product.name}
-              className="w-full h-80 sm:h-[28rem] object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+              className="w-full h-80 sm:h-[28rem] object-contain transition-transform duration-700 ease-out group-hover:scale-105 bg-brand-offwhite dark:bg-dark-card"
             />
           </div>
           {images.length > 1 && (
@@ -189,7 +189,7 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
                   }`}
                   aria-label={`View image ${index + 1}`}
                 >
-                  <img src={src} alt="" className="w-full h-full object-cover" />
+                  <img src={src} alt="" className="w-full h-full object-contain bg-brand-offwhite dark:bg-dark-card" />
                 </button>
               ))}
             </div>

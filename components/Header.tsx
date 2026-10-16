@@ -35,6 +35,10 @@ const Header: React.FC<HeaderProps> = ({
   // hamburger button at the end of the nav.
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Once the page scrolls the header lifts: translucent + blurred so content
+  // passes underneath instead of meeting a hard edge.
+  const [scrolled, setScrolled] = useState(false);
+
   // Escape dismisses the open menu, for keyboard users.
   useEffect(() => {
     if (!menuOpen) return;
@@ -45,6 +49,14 @@ const Header: React.FC<HeaderProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [menuOpen]);
 
+  // Passive listener; setScrolled only re-renders when the boolean flips.
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   /** Header and menu links navigate and dismiss the menu in one go. */
   const navigate = (view: View) => {
     setMenuOpen(false);
@@ -52,13 +64,19 @@ const Header: React.FC<HeaderProps> = ({
   };
 
   const menuItemClass =
-    'w-full text-left px-3 py-2.5 rounded-md hover:bg-white/10 transition-colors';
+    'w-full text-left px-4 py-3 rounded-xl text-brand-offwhite hover:bg-white/10 hover:text-brand-gold transition-colors';
 
   const searchInputClass =
-    'w-full pl-9 pr-3 py-2 rounded-full bg-white/10 border border-white/20 text-sm text-brand-offwhite placeholder-brand-offwhite/50 focus:outline-none focus:ring-2 focus:ring-brand-gold';
+    'w-full pl-9 pr-3 py-2.5 rounded-full bg-white/10 border border-white/15 text-sm text-brand-offwhite placeholder-brand-offwhite/50 focus:outline-none focus:ring-2 focus:ring-brand-gold focus:border-brand-gold transition-colors';
 
   return (
-    <header className="bg-brand-dark text-brand-offwhite shadow-lg sticky top-0 z-50 border-b border-white/10">
+    <header
+      className={`text-brand-offwhite sticky top-0 z-50 border-b border-white/10 transition-all duration-300 ${
+        scrolled
+          ? 'bg-brand-dark/95 backdrop-blur-md shadow-xl'
+          : 'bg-brand-dark shadow-lg'
+      }`}
+    >
       {config.announcement && (
         <div className="bg-brand-gold text-brand-dark text-xs sm:text-sm font-semibold py-2 overflow-hidden">
           {/* One static copy for assistive tech; the scrolling track below is
@@ -82,14 +100,14 @@ const Header: React.FC<HeaderProps> = ({
       <div className="relative z-50 container mx-auto px-4 sm:px-6 py-3 flex justify-between items-center gap-4">
         {/* No shrink-0 here: the title must be allowed to contract so `truncate`
             ellipsizes long store names instead of pushing the nav off-screen. */}
-        <button onClick={() => navigate(View.Home)} className="flex items-center space-x-2 sm:space-x-3 min-w-0">
-          <span className="hidden sm:block shrink-0"><LogoIcon /></span>
-          <h1 className="text-lg sm:text-3xl font-display font-bold text-brand-gold truncate">
+        <button onClick={() => navigate(View.Home)} className="flex items-center space-x-2 sm:space-x-3 min-w-0 group">
+          <span className="hidden sm:block shrink-0 transition-transform duration-300 group-hover:scale-105"><LogoIcon /></span>
+          <h1 className="text-xl sm:text-3xl font-display font-bold text-brand-gold truncate">
             {config.storeName}
           </h1>
         </button>
 
-        <nav className="flex items-center space-x-3 sm:space-x-4 md:space-x-6 shrink-0">
+        <nav className="flex items-center space-x-1 sm:space-x-2 md:space-x-3 shrink-0">
           <div className="relative hidden md:block">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-offwhite/50 pointer-events-none">
               <SearchIcon />
@@ -100,22 +118,22 @@ const Header: React.FC<HeaderProps> = ({
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search products"
               aria-label="Search products"
-              className={`${searchInputClass} w-40 lg:w-60`}
+              className={`${searchInputClass} w-48 lg:w-72`}
             />
           </div>
 
-          <button onClick={() => navigate(View.Home)} className="hidden md:block relative py-1 after:absolute after:left-0 after:-bottom-0.5 after:h-0.5 after:w-0 after:bg-brand-gold after:transition-all after:duration-300 hover:after:w-full hover:text-brand-gold transition-colors duration-300">
+          <button onClick={() => navigate(View.Home)} className="hidden md:block relative py-1 px-2 after:absolute after:left-0 after:-bottom-0.5 after:h-0.5 after:w-0 after:bg-brand-gold after:transition-all after:duration-300 hover:after:w-full hover:text-brand-gold transition-colors duration-300">
             Home
           </button>
 
           <button
             onClick={() => navigate(View.Wishlist)}
-            className="relative hover:text-brand-gold hover:scale-110 transition-all duration-300"
+            className="relative p-2.5 rounded-xl hover:text-brand-gold hover:bg-white/10 hover:scale-105 transition-all duration-300"
             aria-label={`Wishlist, ${wishlistCount} items`}
           >
             <HeartIcon filled={wishlistCount > 0} />
             {wishlistCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-brand-gold text-brand-dark text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 bg-brand-gold text-brand-dark text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center">
                 {wishlistCount}
               </span>
             )}
@@ -123,12 +141,12 @@ const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => navigate(View.Cart)}
-            className="relative hover:text-brand-gold hover:scale-110 transition-all duration-300"
+            className="relative p-2.5 rounded-xl hover:text-brand-gold hover:bg-white/10 hover:scale-105 transition-all duration-300"
             aria-label={`Cart, ${cartItemCount} item${cartItemCount === 1 ? '' : 's'}`}
           >
             <ShoppingCartIcon />
             {cartItemCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-brand-gold text-brand-dark text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 bg-brand-gold text-brand-dark text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                 {cartItemCount}
               </span>
             )}
@@ -137,7 +155,7 @@ const Header: React.FC<HeaderProps> = ({
           {user?.isAdmin && (
             <button
               onClick={() => navigate(View.Admin)}
-              className="hidden md:flex items-center space-x-2 hover:text-brand-gold transition-colors duration-300"
+              className="hidden md:flex items-center space-x-2 py-2.5 px-3 rounded-xl hover:text-brand-gold hover:bg-white/10 transition-colors duration-300"
             >
               <AdminIcon />
               <span className="hidden sm:inline">Admin</span>
@@ -152,7 +170,7 @@ const Header: React.FC<HeaderProps> = ({
                 setMenuOpen(false);
                 onLogout();
               }}
-              className="hidden md:flex items-center space-x-2 bg-brand-gold hover:bg-brand-gold-light text-brand-dark font-semibold py-2 px-3 sm:px-4 rounded-full transition-colors duration-300"
+              className="hidden md:flex items-center space-x-2 bg-brand-gold hover:bg-brand-gold-light text-brand-dark font-semibold py-2.5 px-4 rounded-xl shadow-gold-sm hover:shadow-gold transition-all duration-300"
             >
               <LogoutIcon />
               <span className="hidden sm:inline">Logout</span>
@@ -160,7 +178,7 @@ const Header: React.FC<HeaderProps> = ({
           ) : (
             <button
               onClick={() => navigate(View.Login)}
-              className="hidden md:block bg-brand-gold hover:bg-brand-gold-light text-brand-dark font-semibold py-2 px-3 sm:px-4 rounded-full transition-colors duration-300"
+              className="hidden md:block bg-brand-gold hover:bg-brand-gold-light text-brand-dark font-semibold py-2.5 px-5 rounded-xl shadow-gold-sm hover:shadow-gold transition-all duration-300"
             >
               Login
             </button>
@@ -170,7 +188,7 @@ const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
-            className="md:hidden p-2 -mr-1 rounded-full hover:bg-white/20 transition-colors duration-300"
+            className="md:hidden p-2.5 -mr-1 rounded-xl hover:bg-white/10 transition-colors duration-300"
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
             aria-controls="mobile-nav"

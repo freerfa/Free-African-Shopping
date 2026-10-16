@@ -1,8 +1,10 @@
 
-const ShoppingCartIcon = () => (
+/** Shopping cart glyph. `className` lets callers resize it (e.g. w-4 h-4
+ *  inside a compact Add-to-cart button); it defaults to the header size. */
+const ShoppingCartIcon = ({ className = 'h-6 w-6' }: { className?: string }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    className="h-6 w-6"
+    className={className}
     fill="none"
     viewBox="0 0 24 24"
     stroke="currentColor"
