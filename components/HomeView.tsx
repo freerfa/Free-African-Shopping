@@ -211,7 +211,11 @@ const HomeView: React.FC<HomeViewProps> = ({ searchQuery, onOpenProduct }) => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-16">
+          <div
+            className="grid gap-y-6 gap-x-4 pb-16"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
+          >
+            {/* Auto-fit: as many ≥260px columns as the screen allows, each stretching to share space equally. Replaces fixed breakpoint column counts so the catalog fits phones, tablets and desktops. */}
             {visibleProducts.map((product, i) => (
               <ProductCard key={product.id} product={product} onOpen={onOpenProduct} index={i} />
             ))}
