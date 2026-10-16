@@ -12,9 +12,9 @@ that works. Follow the steps in order — each one assumes the previous is done.
 | Node.js | 18 or newer (built on 22) | `node -v` |
 | npm | 9 or newer | `npm -v` |
 
-No database server to install — SQLite runs inside the Node process through
-`better-sqlite3`. No global CLI tools are needed; everything runs through npm
-scripts.
+No database server to install — the whole store is a JSON file
+(`server/data/store.json`). No global CLI tools or native modules are needed;
+everything runs through npm scripts.
 
 ---
 
@@ -31,16 +31,14 @@ Then install exactly these versions (or copy the `dependencies` and
 of truth):
 
 ```sh
-npm install react@^19.1.0 react-dom@^19.1.0 express@^5.2.1 better-sqlite3@^13.0.3 @google/genai@^1.10.0
+npm install react@^19.1.0 react-dom@^19.1.0 express@^5.2.1 @google/genai@^1.10.0 @supabase/supabase-js@^2.117.3
 npm install -D typescript@~5.7.2 vite@^6.2.0 tsx@^4.23.15 concurrently@^10.0.5 \
   @types/node@^22.14.0 @types/react@^19.3.0 @types/react-dom@^19.3.0 \
-  @types/express@^5.0.6 @types/better-sqlite3@^9.6.0 \
+  @types/express@^5.0.6 \
   tailwindcss@^3.4.19 postcss@^8.5.28 autoprefixer@^10.6.1
 ```
 
-> **If `better-sqlite3` fails to install**, it compiles a native module. Install
-> build tools first: `xcode-select --install` (macOS) or
-> `sudo apt install build-essential python3` (Debian/Ubuntu).
+
 
 ---
 
@@ -146,7 +144,7 @@ meaningful.
 | 2 | `storeConfig.ts` | Store identity and defaults. Imports only from `types.ts`. |
 | 3 | `constants.ts` | Seed catalogue. Imports `Product` only. |
 | 4 | `lib/` (pure helpers) | `format`, `product`, `storage`, `payments`, `images`. No React, no server. |
-| 5 | `server/db.ts` | Opens SQLite, creates the schema, exposes typed queries. |
+| 5 | `server/db.ts` | Opens the JSON store, seeds it, exposes typed queries. |
 | 6 | `server/auth.ts` | Password hashing, sessions, staff accounts, permissions. |
 | 7 | `server/index.ts` | All routes. Depends on 5 and 6. |
 | 8 | `lib/api.ts` | Typed client for every endpoint (mirror step 7). |
@@ -196,12 +194,12 @@ npm run dev
 
 This starts two processes:
 
-- **API + database** on `http://localhost:3001` (Express + SQLite, restarts on edit)
+- **API + database** on `http://localhost:3001` (Express + JSON store, restarts on edit)
 - **Vite dev server** on `http://localhost:5173` (proxies `/api` to the API)
 
 Open **http://localhost:5173**.
 
-First run creates `server/data/store.db`, seeds 8 demo products, and prints the
+First run creates `server/data/store.json`, seeds 8 demo products, and prints the
 admin email it seeded.
 
 ### Production
@@ -233,7 +231,7 @@ The built frontend is served from the same Express process (`dist/`, produced by
 `/api/health` for Render's health check.
 
 **Cost — this is not a free deploy.** Render's Free plan explicitly does not
-support persistent disks, and the disk is what keeps the SQLite database alive
+support persistent disks, and the disk is what keeps the JSON store alive
 across redeploys. The blueprint therefore pins the cheapest paid compute plan:
 
 | Item | Price |
@@ -249,7 +247,7 @@ every deploy/restart wipes the database back to the 8-product seed.
 
 Two behavioural notes with a disk attached: redeploys take a few seconds of
 downtime (Render stops the old instance before starting the new one, to prevent
-two instances writing the same SQLite file), and `npm start` uses `tsx`, so
+two instances writing the same JSON file), and `npm start` uses `tsx`, so
 `devDependencies` must be installed on the build (the default `npm install`
 does this).
 
@@ -362,10 +360,10 @@ Backup**) before you experiment.
 ## 9. Restore from a backup
 
 1. Stop the server.
-2. Replace `server/data/store.db` with your downloaded copy.
+2. Replace `server/data/store.json` with your downloaded copy.
 3. Start again.
 
-Live backups use SQLite's `VACUUM INTO`, so the copy is consistent even while the
+Live backups copy `store.json`, so the copy is consistent even while the
 store is being written to.
 
 ---
@@ -375,7 +373,7 @@ store is being written to.
 | Variable | Read by | Default | Purpose |
 | --- | --- | --- | --- |
 | `PORT` | `server/index.ts` | `3001` | API/server port |
-| `DB_DIR` | `server/db.ts` | `server/data/` | Where the SQLite file lives |
+| `DB_DIR` | `server/db.ts` | `server/data/` | Where the JSON store file lives |
 | `ADMIN_EMAIL` | `server/auth.ts` | from `storeConfig.ts` | First-run owner email |
 | `ADMIN_PASSWORD` | `server/auth.ts` | from `storeConfig.ts` | First-run owner password |
 | `GEMINI_API_KEY` | `vite.config.ts` | — | Enables AI product descriptions |

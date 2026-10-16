@@ -7,6 +7,7 @@ import AdminIcon from './icons/AdminIcon';
 import LogoutIcon from './icons/LogoutIcon';
 import LogoIcon from './icons/LogoIcon';
 import SearchIcon from './icons/SearchIcon';
+import { HeartIcon } from './icons/HeartIcon';
 import MenuIcon from './icons/MenuIcon';
 import CloseIcon from './icons/CloseIcon';
 import ThemeToggle from './ThemeToggle';
@@ -28,7 +29,7 @@ const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
 }) => {
-  const { config } = useStore();
+  const { config, wishlistCount } = useStore();
 
   // Phone/tablet (< md) navigation lives in a collapsible menu toggled by the
   // hamburger button at the end of the nav.
@@ -108,6 +109,19 @@ const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={() => navigate(View.Wishlist)}
+            className="relative hover:text-brand-gold hover:scale-110 transition-all duration-300"
+            aria-label={`Wishlist, ${wishlistCount} items`}
+          >
+            <HeartIcon filled={wishlistCount > 0} />
+            {wishlistCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-brand-gold text-brand-dark text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center">
+                {wishlistCount}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => navigate(View.Cart)}
             className="relative hover:text-brand-gold hover:scale-110 transition-all duration-300"
             aria-label={`Cart, ${cartItemCount} item${cartItemCount === 1 ? '' : 's'}`}
@@ -181,6 +195,17 @@ const Header: React.FC<HeaderProps> = ({
           >
             <button onClick={() => navigate(View.Home)} className={menuItemClass}>
               Home
+            </button>
+            <button
+              onClick={() => navigate(View.Wishlist)}
+              className={`${menuItemClass} flex items-center justify-between`}
+            >
+              <span>Wishlist</span>
+              {wishlistCount > 0 && (
+                <span className="bg-brand-gold text-brand-dark text-xs font-bold rounded-full h-5 px-1.5 shrink-0 flex items-center justify-center">
+                  {wishlistCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => navigate(View.Cart)}

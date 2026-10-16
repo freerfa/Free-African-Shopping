@@ -44,17 +44,8 @@ Or set a different port — but then update `vite.config.ts`'s proxy too.
 
 ---
 
-## `better-sqlite3` will not install
-
-It is a native module and needs build tools:
-
-```sh
-xcode-select --install                        # macOS
-sudo apt install build-essential python3      # Debian/Ubuntu
-npm rebuild better-sqlite3
-```
-
 ---
+
 
 ## "Admin session required" / signed out unexpectedly
 
@@ -79,7 +70,7 @@ bug — see `docs/PERMISSIONS.md`.
 ## Locked out of everything
 
 Only possible if the owner password is lost. Restore from a backup
-(**Admin → Database → Backup** if you had one), or delete `server/data/store.db`
+(**Admin → Database → Backup** if you had one), or delete `server/data/store.json`
 to start fresh — **this discards all products, orders and staff accounts**.
 
 ---

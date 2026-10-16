@@ -1,7 +1,7 @@
 # Free African Shopping
 
 A React + TypeScript + Vite storefront with an admin panel, backed by a small
-Express server with a built-in SQLite database (`server/`). Products, orders and
+Express server with a built-in JSON-file database (`server/`). Products, orders and
 store settings live in one shared database file — every visitor sees the same
 catalogue, and your data survives refreshes, browsers and devices. The cart and
 theme preference stay in `localStorage` (they are per-shopper state).
@@ -31,14 +31,19 @@ theme preference stay in `localStorage` (they are per-shopper state).
 
 You need [Node.js](https://nodejs.org) 18 or newer.
 
+To enable a shared cloud database that syncs both localhost and live hosts, copy `.env.example` to `.env` and fill in your Supabase project values:
+
 ```sh
+cp .env.example .env
 npm install
 npm run dev
 ```
 
+When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set, the server writes the current store state to a `store_state` row in Supabase and listens for remote updates from the same table. Local JSON remains as a fallback and is still updated so the app can recover cleanly if the cloud service is temporarily unavailable.
+
 `npm run dev` starts both processes:
 
-- **API + database** on `http://localhost:3001` (Express + SQLite, reloads on edit)
+- **API + database** on `http://localhost:3001` (Express + JSON store, reloads on edit)
 - **Vite dev server** on `http://localhost:5173` (proxies `/api` to the API)
 
 Open the Vite URL in your browser. Other commands:
@@ -57,7 +62,7 @@ Environment variables for the server:
 | `PORT` | `3001` | API/server port |
 | `ADMIN_EMAIL` | value from `storeConfig.ts` | First-run admin login |
 | `ADMIN_PASSWORD` | value from `storeConfig.ts` | First-run admin password |
-| `DB_DIR` | `server/data/` | Where the SQLite database file lives |
+| `DB_DIR` | `server/data/` | Where the JSON store file lives |
 
 ---
 
@@ -90,7 +95,7 @@ Environment variables for the server:
     prices it from the catalogue and decrements stock exactly like checkout
   - **export** the whole store to a `.json` file, and **import** one back
   - run **file tools** on the database (size and row counts, integrity check,
-    optimize, a one-click `.db` backup download, purging the order book)
+    optimize, a one-click backup download, purging the order book)
 
 ### Admin accounts and rights
 
@@ -254,11 +259,11 @@ the payment selection never affects what an order costs.
 App.tsx                 hash router (#/… deep links) + search/selection state + order confirmation
 index.tsx               entry point (mounts ThemeProvider > App)
 index.css               runtime colour variables + base styles
-constants.ts            seed catalogue the server loads into SQLite on first run
+constants.ts            seed catalogue the server loads into the JSON store on first run
 storeConfig.ts          default store identity, brand colours, payment defaults, seed admin credentials
 types.ts                shared domain types (imported by client *and* server)
 server/index.ts         Express REST API + static hosting for dist/
-server/db.ts            SQLite schema, seeding and record helpers (server/data/store.db)
+server/db.ts            JSON-file schema, seeding and record helpers (server/data/store.json)
 server/auth.ts          scrypt password hashing, sessions, login rate limiting
 contexts/               StoreContext (loads/saves via /api), ThemeContext (light/dark), ToastContext
 components/             storefront views, shared UI, icons, error boundary
@@ -293,7 +298,7 @@ serverless endpoint instead.
 
 ## The API (built-in database)
 
-All store data lives in one SQLite file — `server/data/store.db` (gitignored).
+All store data lives in one JSON file — `server/data/store.json` (gitignored).
 Back it up from **Admin → Database** (Download backup) or by copying the file.
 Endpoints:
 
@@ -315,9 +320,9 @@ Endpoints:
 | GET / POST | `/api/auth/me`, `/api/auth/logout` | admin | session check (returns the account's rights) / end session |
 | GET / POST / PUT / DELETE | `/api/staff[/:email]` | `staff.manage` | list, create, update rights and remove staff accounts |
 | GET | `/api/database` | admin | database file size, journal mode, page stats and row counts per table |
-| POST | `/api/database/check` | admin | `PRAGMA integrity_check` — `ok`, or the list of problems found |
-| POST | `/api/database/optimize` | admin | `VACUUM` the file (reclaim space, refresh statistics) and return fresh stats |
-| GET | `/api/database/backup` | admin | download a consistent `.db` copy of the live database (`VACUUM INTO`) |
+| POST | `/api/database/check` | admin | JSON integrity check — `ok`, or the list of problems found |
+| POST | `/api/database/optimize` | admin | Compact rewrite (reclaim space, refresh statistics) and return fresh stats |
+| GET | `/api/database/backup` | admin | download a consistent copy of the live `store.json` |
 | DELETE | `/api/orders` | admin | purge the whole order book (products, settings and login stay untouched) |
 | POST | `/api/import` | admin | replace config + catalogue + orders from a `.json` snapshot |
 | POST | `/api/reset` | admin | restore seed catalogue, default settings, empty order book |

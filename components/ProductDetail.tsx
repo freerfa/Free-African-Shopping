@@ -17,6 +17,7 @@ import {
 import ContactUs from './ContactUs';
 import { goldButtonClass, inputClass, labelClass, Section, Stars, StarInput } from './ui';
 import ChevronRightIcon from './icons/ChevronRightIcon';
+import { HeartIcon } from './icons/HeartIcon';
 
 interface ProductDetailProps {
   product: Product | undefined;
@@ -26,7 +27,7 @@ interface ProductDetailProps {
 }
 
 const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, onOpen }) => {
-  const { config, products, reviewSummaries, refreshReviewSummaries } = useStore();
+  const { config, products, reviewSummaries, refreshReviewSummaries, wishlist, toggleWishlist } = useStore();
   const [activeImage, setActiveImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [selection, setSelection] = useState<Record<string, string>>({});
@@ -197,9 +198,18 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, onBack, onAdd, o
 
         <div>
           <p className="text-sm font-medium text-brand-gold-ink dark:text-brand-gold uppercase tracking-wider">{product.category}</p>
-          <h1 className="text-3xl md:text-4xl font-bold text-brand-dark dark:text-dark-text mt-1">
-            {product.name}
-          </h1>
+          <div className="flex items-center justify-between mt-1">
+            <h1 className="text-3xl md:text-4xl font-bold text-brand-dark dark:text-dark-text">
+              {product.name}
+            </h1>
+            <button
+              onClick={() => toggleWishlist(product.id)}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+              aria-label={wishlist.includes(product.id) ? "Remove from wishlist" : "Add to wishlist"}
+            >
+              <HeartIcon filled={wishlist.includes(product.id)} />
+            </button>
+          </div>
 
           {/* Star-rating summary from the shared aggregates map. Only shown once
               at least one review has been approved. */}

@@ -65,9 +65,9 @@ interface DatabasePanelProps {
  *
  * The split is deliberate. Records go through the normal validated API (the same
  * one the Products and Orders tabs use), so a hand-typed price or a bad status
- * is still rejected by the server. Raw-file tools — integrity check, VACUUM,
- * backup, wiping the order book — live in the collapsed "File tools" card at the
- * bottom, out of the way of the everyday editing.
+ * is still rejected by the server. Raw-file tools — integrity check, rewriting
+ * the file compactly, backup, wiping the order book — live in the collapsed
+ * "File tools" card at the bottom, out of the way of the everyday editing.
  */
 const DatabasePanel: React.FC<DatabasePanelProps> = ({ onNotice }) => {
   const {
@@ -269,7 +269,7 @@ const DatabasePanel: React.FC<DatabasePanelProps> = ({ onNotice }) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `store-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      link.download = `store-backup-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -577,13 +577,13 @@ const DatabasePanel: React.FC<DatabasePanelProps> = ({ onNotice }) => {
               type="button" onClick={() => void runOptimize()} disabled={busy !== null}
               className={smallButton}
             >
-              {busy === 'optimize' ? 'Optimizing…' : 'Optimize (VACUUM)'}
+              {busy === 'optimize' ? 'Optimizing…' : 'Rewrite file (compact)'}
             </button>
             <button
               type="button" onClick={() => void downloadBackup()} disabled={busy !== null}
               className={smallButton}
             >
-              {busy === 'backup' ? 'Preparing…' : 'Download backup (.db)'}
+              {busy === 'backup' ? 'Preparing…' : 'Download backup (.json)'}
             </button>
           </div>
 

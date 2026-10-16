@@ -12,6 +12,7 @@ import CartView from './components/CartView';
 import CheckoutView from './components/CheckoutView';
 import LoginView from './components/LoginView';
 import TrackOrderView from './components/TrackOrderView';
+import WishlistView from './components/WishlistView';
 import Spinner from './components/Spinner';
 import { formatPrice } from './lib/format';
 
@@ -51,6 +52,8 @@ const parseHash = (): RouteState => {
       return { view: View.Login, productId: null };
     case 'track':
       return { view: View.TrackOrder, productId: null };
+    case 'wishlist':
+      return { view: View.Wishlist, productId: null };
     case 'admin':
       return { view: View.Admin, productId: null };
     default:
@@ -71,6 +74,8 @@ const hashForRoute = (view: View, productId: string | null): string | null => {
       return '#/login';
     case View.TrackOrder:
       return '#/track';
+    case View.Wishlist:
+      return '#/wishlist';
     case View.Admin:
       return '#/admin';
     default:
@@ -169,6 +174,9 @@ const Storefront: React.FC = () => {
         break;
       case View.TrackOrder:
         document.title = `Track your order · ${config.storeName}`;
+        break;
+      case View.Wishlist:
+        document.title = `Your Wishlist · ${config.storeName}`;
         break;
       case View.Admin:
         document.title = `Admin · ${config.storeName}`;
@@ -298,6 +306,13 @@ const Storefront: React.FC = () => {
         {view === View.Login && <LoginView onDone={goHome} />}
 
         {view === View.TrackOrder && <TrackOrderView onBack={goHome} />}
+
+        {view === View.Wishlist && (
+          <WishlistView
+            onOpenProduct={openProduct}
+            onContinueShopping={goHome}
+          />
+        )}
 
         {view === View.Admin && user?.isAdmin && (
           <React.Suspense

@@ -39,20 +39,23 @@ import {
   allReviews,
   clearOrders,
   dataDir,
-  db,
   dbFile,
   DEFAULT_CONFIG,
   getCoupon,
   getCouponByCode,
+  getDatabaseTables,
   getOrderByReference,
   getProduct,
   getReview,
   getSetting,
+  getTableRowCount,
   insertCoupon,
   insertOrder,
   insertProduct,
   insertReview,
+  integrityCheck,
   orderReferenceExists,
+  optimize,
   removeCoupon,
   removeOrder,
   removeProduct,
@@ -70,6 +73,9 @@ import {
   updateOrderStatusRow,
   updateProductData,
   updateReviewStatusRow,
+  vacuum,
+  vacuumInto,
+  withTransaction,
 } from './db';
 import { normalizePayments } from '../storeConfig';
 import {
@@ -584,15 +590,15 @@ const readPaymentBody = (raw: unknown, payments: StorePayments): PaymentInfo | u
 /** Creates an order in one transaction: re-validates stock, computes prices
  *  from the database (client prices are never trusted), decrements stock and
  *  inserts the order under a unique FAS-###### reference. Throws HttpError
- *  with the shopper-facing wording the old client used; better-sqlite3 rolls
- *  the whole transaction back on throw. */
+ *  with the shopper-facing wording the old client used; `db.transaction`
+ *  restores the previous state and the file on disk on throw. */
 const createOrder = (
   details: { name: string; email: string; phone: string; address: string },
   payment: PaymentInfo | undefined,
   requested: RequestedLine[],
   couponCode?: string,
 ): Order => {
-  const run = db.transaction((): Order => {
+  const run = withTransaction((): Order => {
     if (requested.length === 0) throw new HttpError(400, 'Your cart is empty.');
 
     const resolved: ResolvedLine[] = [];
@@ -730,7 +736,7 @@ const createOrder = (
     insertOrder(order);
     return order;
   });
-  return run();
+  return run;
 };
 
 app.post('/api/orders', (req, res) => {
@@ -790,7 +796,7 @@ app.post('/api/orders', (req, res) => {
 
 // ---- database management ---------------------------------------------------
 
-/** Size of a file on disk, or 0 when it does not exist (e.g. a clean WAL). */
+/** Size of a file on disk, or 0 when it does not exist. */
 const fileSize = (file: string): number => {
   try {
     return fs.statSync(file).size;
@@ -799,26 +805,21 @@ const fileSize = (file: string): number => {
   }
 };
 
-/** Overview of the live database: file sizes, page stats and row counts per
- *  table. Table names come from `sqlite_master`, so they are server-trusted;
- *  counts are read-only and safe to run while the store is busy. */
+/** Overview of the live store: file size and row counts per collection. The
+ *  collection list comes from the server, so it is trusted; counts are
+ *  read-only and safe to run while the store is busy. */
 const databaseInfo = () => ({
   file: dbFile,
   sizeBytes: fileSize(dbFile),
-  walBytes: fileSize(`${dbFile}-wal`),
-  journalMode: String(db.pragma('journal_mode', { simple: true })),
-  pageSize: Number(db.pragma('page_size', { simple: true })),
-  pageCount: Number(db.pragma('page_count', { simple: true })),
-  freelistPages: Number(db.pragma('freelist_count', { simple: true })),
-  tables: (
-    db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-      )
-      .all() as { name: string }[]
-  ).map(({ name }) => ({
+  // Kept for the client's shape: the JSON store has no write-ahead log.
+  walBytes: 0,
+  journalMode: 'json',
+  pageSize: 4096,
+  pageCount: Math.max(1, Math.ceil(fileSize(dbFile) / 4096)),
+  freelistPages: 0,
+  tables: getDatabaseTables().map(({ name }) => ({
     name,
-    rows: Number((db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number }).n),
+    rows: getTableRowCount(name).n,
   })),
 });
 
@@ -832,7 +833,7 @@ app.get('/api/database', requireAdmin, requirePermission('database.view'), (_req
 
 app.post('/api/database/check', requireAdmin, requirePermission('database.manage'), (_req, res) => {
   try {
-    const rows = db.pragma('integrity_check') as { integrity_check: string }[];
+    const rows = integrityCheck();
     const messages = rows.map((row) => row.integrity_check);
     res.json({ ok: messages.length === 1 && messages[0] === 'ok', messages });
   } catch (error) {
@@ -840,30 +841,29 @@ app.post('/api/database/check', requireAdmin, requirePermission('database.manage
   }
 });
 
-/** VACUUM rebuilds the file compactly (reclaiming pages freed by deletes such
- *  as a purge) and `PRAGMA optimize` refreshes query-planner statistics. It
- *  never touches the data itself — safe to run while shoppers are browsing. */
+/** Rewrites the file compactly (reclaiming the space a purge left behind).
+ *  The data itself never changes — safe to run while shoppers are browsing. */
 app.post('/api/database/optimize', requireAdmin, requirePermission('database.manage'), (_req, res) => {
   try {
-    db.exec('VACUUM');
-    db.pragma('optimize');
+    vacuum();
+    optimize();
     res.json(databaseInfo());
   } catch (error) {
     sendError(res, error);
   }
 });
 
-/** Downloads a consistent copy of the live database. `VACUUM INTO` writes a
- *  fresh, compacted file with everything committed so far (the WAL is folded
- *  in), so the backup is safe to take while the store is running. Restore by
- *  stopping the server and replacing `store.db` with the downloaded file. */
+/** Downloads a consistent copy of the live database. The JSON store's
+ *  A file copy captures everything committed so far, so the
+ *  backup is safe to take while the store is running. Restore by stopping the
+ *  server and replacing `store.json` with the downloaded file. */
 app.get('/api/database/backup', requireAdmin, requirePermission('database.manage'), (_req, res) => {
   try {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    const destination = path.join(dataDir, `store-backup-${stamp}.db`);
+    const destination = path.join(dataDir, `store-backup-${stamp}.json`);
     fs.rmSync(destination, { force: true });
-    db.exec(`VACUUM INTO '${destination.replace(/'/g, "''")}'`);
-    res.download(destination, `store-backup-${stamp}.db`, (error) => {
+    vacuumInto(destination);
+    res.download(destination, `store-backup-${stamp}.json`, (error) => {
       // Remove the temp copy once it has been streamed — or immediately when
       // the transfer failed, so a broken attempt litters nothing.
       try {
@@ -883,8 +883,8 @@ app.get('/api/database/backup', requireAdmin, requirePermission('database.manage
  *  "remove order history" action (Settings → Data still offers a full reset). */
 app.delete('/api/orders', requireAdmin, requirePermission('database.manage'), (_req, res) => {
   try {
-    const { changes } = db.prepare('DELETE FROM orders').run();
-    res.json({ cleared: Number(changes) });
+    clearOrders();
+    res.json({ cleared: 0 });
   } catch (error) {
     sendError(res, error);
   }
@@ -1380,13 +1380,13 @@ app.post('/api/import', requireAdmin, requirePermission('data.import'), (req, re
     const reviews = snapshot.reviews !== undefined ? normalizeReviews(snapshot.reviews) : null;
     const staff = snapshot.staff !== undefined ? normalizeStaffSnapshot(snapshot.staff) : null;
 
-    db.transaction(() => {
+    withTransaction(() => {
       replaceProducts(products);
       replaceOrders(orders);
       if (coupons !== null) replaceCoupons(coupons);
       if (reviews !== null) replaceReviews(reviews);
       setSetting('config', config);
-    })();
+    });
     // Staff membership syncs outside the catalogue transaction: it touches a
     // different table with its own transaction and its own no-delete rule.
     const staffSync =
@@ -1413,11 +1413,11 @@ app.post('/api/import', requireAdmin, requirePermission('data.import'), (req, re
 
 app.post('/api/reset', requireAdmin, requirePermission('data.reset'), (_req, res) => {
   try {
-    db.transaction(() => {
+    withTransaction(() => {
       setSetting('config', DEFAULT_CONFIG);
       seedProducts();
       clearOrders();
-    })();
+    });
     res.json({
       config: { ...DEFAULT_CONFIG, adminPassword: '' },
       products: allProducts(),

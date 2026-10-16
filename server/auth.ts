@@ -20,7 +20,22 @@
  */
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { db, getSetting, setSetting } from './db';
+import {
+  deleteExpiredSessions,
+  deleteSessionByToken,
+  deleteSessionsByEmail,
+  deleteStaffRow,
+  getSessionByToken,
+  getSetting,
+  insertSession,
+  insertStaffRow,
+  listStaffRows,
+  readStaffRow,
+  setSetting,
+  updateStaffPermissions,
+  updateStaffSaltHash,
+  withTransaction,
+} from './db';
 import { DEFAULT_STORE_CONFIG } from '../storeConfig';
 import { ALL_PERMISSIONS, PERMISSION_LABELS } from '../types';
 import type { Permission, StaffMember, User } from '../types';
@@ -34,15 +49,6 @@ interface AdminAuth {
   email: string;
   salt: string;
   hash: string;
-}
-
-/** A staff row as stored: the scrypt pair plus the JSON permission list. */
-interface StaffRow {
-  email: string;
-  salt: string;
-  hash: string;
-  permissions: string;
-  created_at: number;
 }
 
 // ---- password hashing -----------------------------------------------------
@@ -83,26 +89,20 @@ export const updateAdminCredentials = (patch: { email?: string; password?: strin
 // ---- sessions -------------------------------------------------------------
 
 export const createSession = (email: string): string => {
-  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
+  deleteExpiredSessions(Date.now());
   const token = crypto.randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO sessions (token, email, expires_at) VALUES (?, ?, ?)').run(
-    token,
-    email,
-    Date.now() + SESSION_TTL_MS,
-  );
+  insertSession(token, email, Date.now() + SESSION_TTL_MS);
   return token;
 };
 
 export const getSession = (token: string): { email: string } | null => {
-  const row = db.prepare('SELECT email, expires_at FROM sessions WHERE token = ?').get(token) as
-    | { email: string; expires_at: number }
-    | undefined;
+  const row = getSessionByToken(token);
   if (!row || row.expires_at < Date.now()) return null;
   return { email: row.email };
 };
 
 export const destroySession = (token: string): void => {
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  deleteSessionByToken(token);
 };
 
 /** Extracts a `Bearer <token>` value from the Authorization header, if any. */
@@ -158,12 +158,9 @@ const cleanPermissions = (value: unknown): Permission[] => {
   return ALL_PERMISSIONS.filter((p) => value.includes(p));
 };
 
-const readStaffRow = (email: string): StaffRow | null =>
-  (db.prepare('SELECT * FROM staff WHERE email = ?').get(email) as StaffRow | undefined) ?? null;
-
 /** Staff list for the admin panel — never includes the hash or salt. */
 export const listStaff = (): StaffMember[] => {
-  const rows = db.prepare('SELECT * FROM staff ORDER BY created_at ASC').all() as StaffRow[];
+  const rows = listStaffRows();
   return rows.map((row) => ({
     email: row.email,
     permissions: cleanPermissions(safeParse(row.permissions)),
@@ -223,9 +220,7 @@ export const createStaff = (input: {
   if (readStaffRow(email)) throw new Error('A staff account with that email already exists.');
   const { salt, hash } = hashPassword(input.password);
   const permissions = cleanPermissions(input.permissions);
-  db.prepare(
-    'INSERT INTO staff (email, salt, hash, permissions, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(email, salt, hash, JSON.stringify(permissions), Date.now());
+  insertStaffRow(email, salt, hash, JSON.stringify(permissions), Date.now());
   return { email, permissions, createdAt: Date.now(), hasPassword: true };
 };
 
@@ -239,14 +234,11 @@ export const updateStaff = (
   const row = readStaffRow(key);
   if (!row) return null;
   if (patch.permissions) {
-    db.prepare('UPDATE staff SET permissions = ? WHERE email = ?').run(
-      JSON.stringify(cleanPermissions(patch.permissions)),
-      key,
-    );
+    updateStaffPermissions(key, JSON.stringify(cleanPermissions(patch.permissions)));
   }
   if (patch.password) {
     const { salt, hash } = hashPassword(patch.password);
-    db.prepare('UPDATE staff SET salt = ?, hash = ? WHERE email = ?').run(salt, hash, key);
+    updateStaffSaltHash(key, salt, hash);
   }
   const updated = readStaffRow(key)!;
   return {
@@ -268,7 +260,7 @@ export const verifyStaffCredentials = (email: string): { salt: string; hash: str
 export const deleteStaff = (email: string): boolean => {
   const key = email.trim().toLowerCase();
   if (isOwnerEmail(key)) return false;
-  const { changes } = db.prepare('DELETE FROM staff WHERE email = ?').run(key);
+  const { changes } = deleteStaffRow(key);
   if (changes > 0) destroySessionsFor(key);
   return changes > 0;
 };
@@ -287,39 +279,31 @@ export const syncStaffMembership = (
   const created: string[] = [];
   const updated: string[] = [];
   const skipped: string[] = [];
-  const upsert = db.transaction(
-    (list: { email: string; permissions: Permission[]; createdAt: number }[]) => {
-      for (const member of list) {
-        const email = member.email.trim().toLowerCase();
-        if (isOwnerEmail(email)) {
-          skipped.push(email);
-          continue;
-        }
-        const permissions = cleanPermissions(member.permissions);
-        if (permissions.length === 0) {
-          skipped.push(email);
-          continue;
-        }
-        const existing = readStaffRow(email);
-        if (!existing) {
-          db.prepare(
-            'INSERT INTO staff (email, salt, hash, permissions, created_at) VALUES (?, ?, ?, ?, ?)',
-          ).run(email, '*', '*', JSON.stringify(permissions), member.createdAt);
-          created.push(email);
-        } else if (JSON.stringify(cleanPermissions(safeParse(existing.permissions))) !== JSON.stringify(permissions)) {
-          db.prepare('UPDATE staff SET permissions = ? WHERE email = ?').run(
-            JSON.stringify(permissions),
-            email,
-          );
-          // Rights changed remotely: drop live sessions so the new limits apply
-          // at once, mirroring the single-edit route.
-          destroySessionsFor(email);
-          updated.push(email);
-        }
+  withTransaction(() => {
+    for (const member of members) {
+      const email = member.email.trim().toLowerCase();
+      if (isOwnerEmail(email)) {
+        skipped.push(email);
+        continue;
       }
-    },
-  );
-  upsert(members);
+      const permissions = cleanPermissions(member.permissions);
+      if (permissions.length === 0) {
+        skipped.push(email);
+        continue;
+      }
+      const existing = readStaffRow(email);
+      if (!existing) {
+        insertStaffRow(email, '*', '*', JSON.stringify(permissions), member.createdAt);
+        created.push(email);
+      } else if (JSON.stringify(cleanPermissions(safeParse(existing.permissions))) !== JSON.stringify(permissions)) {
+        updateStaffPermissions(email, JSON.stringify(permissions));
+        // Rights changed remotely: drop live sessions so the new limits apply
+        // at once, mirroring the single-edit route.
+        destroySessionsFor(email);
+        updated.push(email);
+      }
+    }
+  });
   return { created, updated, skipped };
 };
 
@@ -327,7 +311,7 @@ export const syncStaffMembership = (
  *  account is removed, so a change takes effect immediately rather than when
  *  their current token happens to expire. */
 export const destroySessionsFor = (email: string): void => {
-  db.prepare('DELETE FROM sessions WHERE email = ?').run(email.trim().toLowerCase());
+  deleteSessionsByEmail(email.trim().toLowerCase());
 };
 
 // ---- login rate limiting --------------------------------------------------

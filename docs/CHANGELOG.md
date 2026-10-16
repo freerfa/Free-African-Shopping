@@ -8,6 +8,15 @@ and the reasoning. Link to the doc that owns the topic when one does.
 
 ---
 
+## 2026-10-16 — Data layer: SQLite replaced by a JSON file with optional Supabase sync
+
+- **`server/db.ts`** is now a JSON-file data layer (`server/data/store.json`), configurable via `DB_DIR`, with optional Supabase cloud sync (`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`). Writes are atomic (temp file + rename). No native modules.
+- **`better-sqlite3`** removed from dependencies; `@supabase/supabase-js` added.
+- **Database admin endpoints** now operate on the JSON file: integrity check validates the JSON, optimize rewrites it compactly, backup downloads a copy of `store.json`. `VACUUM INTO` / `PRAGMA` / WAL-mode concepts no longer apply.
+- **Docs synced**: `README.md`, `docs/REBUILD.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/DATA-MODEL.md`, `docs/TROUBLESHOOTING.md`, `docs/CHANGELOG.md`.
+
+Why: a single JSON file you can copy, version-control or drop onto any host is simpler to run than SQLite (no native module, no build tools), and pairs with a persistent disk on Render so redeploys don't wipe the store.
+
 ## 2026-10-15 — Storefront polish: motion, hero, reviews/coupons UI
 
 - **Reveal-on-scroll** (`App.tsx` + `index.css`): `[data-reveal]` cards fade up
@@ -29,7 +38,7 @@ and the reasoning. Link to the doc that owns the topic when one does.
 **Why:** finish the uncommitted UI side of the 2026-10-13 coupons/reviews/track
 release so the code on GitHub (and Render via auto-deploy) matches the local
 storefront. Typecheck + build clean; data itself syncs via the JSON export,
-not git (the SQLite file stays gitignored by design).
+not git (the JSON file stays gitignored by design).
 
 ---
 
@@ -89,11 +98,11 @@ the local database stays gitignored by design.
 Render rejects — its docs state free web services don't support persistent
 disks. A blueprint that fails on connect is useless, so the plan had to become
 the cheapest one that supports disks. The disk itself is non-negotiable: the
-store's entire database is one SQLite file, and without the disk every
+store's entire database is one JSON file, and without the disk every
 redeploy or restart resets products, orders and admin accounts to the seed.
 
 Also documented: with a disk attached, redeploys take a few seconds of downtime
-(Render's guard against two instances writing the same SQLite file), and going
+(Render's guard against two instances writing the same JSON file), and going
 back to `plan: free` requires deleting the `disk:` block in the same edit.
 
 ---
@@ -264,8 +273,7 @@ normalised.
 ## Before this session
 
 The store ran entirely on `localStorage` — one browser, one device, ~5 MB
-ceiling. It was rebuilt around an Express + SQLite backend
-(`server/data/store.db`) so every visitor shares one catalogue and data survives
+ceiling. It was rebuilt around an Express + JSON-file backend (server/data/store.json) so every visitor shares one catalogue and data survives
 across browsers. The client and server agree on shapes through the same
 `normalizeProduct()` helper.
 

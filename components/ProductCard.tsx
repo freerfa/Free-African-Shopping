@@ -5,6 +5,7 @@ import { formatPrice, formatPriceOrEnquiry } from '../lib/format';
 import { isContactOnly, isOnSale, isSoldOut, primaryImage, totalStock } from '../lib/product';
 import ContactUs from './ContactUs';
 import ShoppingCartIcon from './icons/ShoppingCartIcon';
+import { HeartIcon } from './icons/HeartIcon';
 
 interface ProductCardProps {
   product: Product;
@@ -14,7 +15,7 @@ interface ProductCardProps {
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 }) => {
-  const { config, addToCart } = useStore();
+  const { config, addToCart, wishlist, toggleWishlist } = useStore();
   const soldOut = isSoldOut(product);
   const onSale = isOnSale(product);
   // `null` means stock isn't tracked (Services/Jobs): never sold out, and the
@@ -58,6 +59,16 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onOpen, index = 0 })
                 Only {remaining} left
               </span>
             )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleWishlist(product.id);
+              }}
+              className="absolute bottom-3 right-3 p-2 bg-white/80 dark:bg-black/40 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform z-10"
+              aria-label={wishlist.includes(product.id) ? "Remove from wishlist" : "Add to wishlist"}
+            >
+              <HeartIcon filled={wishlist.includes(product.id)} />
+            </button>
           </button>
 
           <div className="p-5 sm:p-6 flex-grow flex flex-col">

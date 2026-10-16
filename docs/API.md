@@ -74,9 +74,9 @@ price-on-enquiry listing (Services/Jobs) are rejected with 409.
 | `DELETE` | `/api/products/:id` | `products.manage` | Delete |
 | `PUT` | `/api/config` | `settings.manage` | Update settings (credentials ride along) |
 | `GET` | `/api/database` | `database.view` | File size, journal mode, page stats, row counts |
-| `POST` | `/api/database/check` | `database.manage` | `PRAGMA integrity_check` |
-| `POST` | `/api/database/optimize` | `database.manage` | `VACUUM` and return fresh stats |
-| `GET` | `/api/database/backup` | `database.manage` | Download a consistent `.db` copy (`VACUUM INTO`) |
+| `POST` | `/api/database/check` | `database.manage` | JSON integrity check |
+| `POST` | `/api/database/optimize` | `database.manage` | Compact rewrite and return fresh stats |
+| `GET` | `/api/database/backup` | `database.manage` | Download a consistent copy of `store.json` |
 | `POST` | `/api/import` | `data.import` | Replace config + catalogue + orders from a snapshot |
 | `POST` | `/api/reset` | `data.reset` | Reset the store to its defaults |
 | `GET` | `/api/staff` | `staff.manage` | List staff accounts + the owner |

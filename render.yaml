@@ -5,7 +5,7 @@
 # PLAN AND COST — read before changing `plan`:
 #   Render's Free plan does NOT support persistent disks (Render docs: "Free web
 #   services don't support the following features of paid compute plans: ...
-#   Persistent disks"). This store's whole database is a SQLite file, so without
+#   Persistent disks"). This store's whole database is a JSON file, so without
 #   a disk every redeploy or restart would wipe products, orders and admin
 #   accounts back to the seed demo data.
 #   Cheapest plan that works: 0.5c-512mb (legacy name "starter")

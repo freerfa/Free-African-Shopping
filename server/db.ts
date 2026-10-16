@@ -1,181 +1,428 @@
-/**
- * SQLite data layer for the store.
+/** JSON-file data layer for the store, with optional Supabase sync.
  *
- * Products, orders and settings used to live in `localStorage` (~5 MB ceiling,
- * one browser, one device). They now live in a real embedded database file
- * (`server/data/store.db`) that the Express API in `server/index.ts` reads and
- * writes, so every visitor shares one store and the data survives across
- * browsers. Rows are normalised through the same `normalizeProduct` helper
- * the client uses, so both ends agree on shapes.
+ * The whole shop lives in one ordinary JSON file (`server/data/store.json`).
+ * No native modules, no journal files, no migrations — just a file you can
+ * copy, version-control, or drop into another host. When `SUPABASE_URL` and a
+ * service-role key are set, every save is also upserted to the `store_state`
+ * table (`id = 'shop'`) and remote changes are applied live, so localhost and
+ * Render stay in sync. Local JSON remains as a fallback when the cloud is
+ * unreachable.
  *
- * `products`/`orders` keep the whole record as JSON in one column (the app
- * only ever reads whole records); `settings` is a key/value bag (store config,
- * admin credentials); `sessions` backs bearer-token admin auth.
+ * Writes are atomic: the file is written to a temp name and renamed over the
+ * real one, so a crashed restart can never leave a half-written JSON blob.
  */
-import Database from 'better-sqlite3';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Coupon, Order, OrderStatus, Product, ProductReview, StoreConfig } from '../types';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type {
+  Coupon,
+  Order,
+  OrderStatus,
+  Permission,
+  Product,
+  ProductReview,
+  StoreConfig,
+} from '../types';
 import { INITIAL_PRODUCTS } from '../constants';
 import { DEFAULT_STORE_CONFIG } from '../storeConfig';
 import { normalizeProduct } from '../lib/storage';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-export const dataDir = process.env.DB_DIR
-  ? path.resolve(process.env.DB_DIR)
-  : path.join(moduleDir, 'data');
-export const dbFile = path.join(dataDir, 'store.db');
 
-fs.mkdirSync(dataDir, { recursive: true });
+/** Data directory + file name. `DB_DIR` keeps it movable for the Render host. */
+export const dataDir =
+  process.env.DB_DIR !== undefined ? path.resolve(process.env.DB_DIR) : path.join(moduleDir, 'data');
+export const dbFile = path.join(dataDir, 'store.json');
 
-export const db = new Database(dbFile);
-// WAL keeps reads fast while a write is in flight; busy_timeout weather's the
-// occasional collision while `tsx watch` restarts the server mid-request.
-db.pragma('journal_mode = WAL');
-db.pragma('busy_timeout = 5000');
+// ---------------------------------------------------------------------------
+// On-disk format (deliberately human-editable, one object)
+// ---------------------------------------------------------------------------
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
+interface DbSettings {
+  config: StoreConfig;
+  adminAuth: { email: string; salt: string; hash: string } | null;
+}
 
-  CREATE TABLE IF NOT EXISTS products (
-    id         TEXT PRIMARY KEY,
-    data       TEXT NOT NULL,
-    -- Newest admin-created products sort first (negative indices); seed data
-    -- keeps its file order. Set at insert, never rewritten on update.
-    sort_index INTEGER NOT NULL
-  );
+interface DbState {
+  settings: DbSettings;
+  products: Array<{ id: string; product: Product; sort_index: number }>;
+  orders: Order[];
+  sessions: Array<{ token: string; email: string; expires_at: number }>;
+  staff: Array<{ email: string; salt: string; hash: string; permissions: Permission[]; created_at: number }>;
+  coupons: Coupon[];
+  reviews: ProductReview[];
+}
 
-  CREATE TABLE IF NOT EXISTS orders (
-    id         TEXT PRIMARY KEY,
-    reference  TEXT NOT NULL UNIQUE,
-    created_at INTEGER NOT NULL,
-    status     TEXT NOT NULL,
-    data       TEXT NOT NULL
-  );
+const EMPTY_STATE: DbState = {
+  settings: { config: { ...DEFAULT_STORE_CONFIG, adminPassword: '' }, adminAuth: null },
+  products: [],
+  orders: [],
+  sessions: [],
+  staff: [],
+  coupons: [],
+  reviews: [],
+};
 
-  CREATE TABLE IF NOT EXISTS sessions (
-    token      TEXT PRIMARY KEY,
-    email      TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
-  );
+const supabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY ?? '').trim();
+const syncTable = process.env.STORE_SYNC_TABLE?.trim() || 'store_state';
 
-  -- Staff accounts the owner created, each with its own set of rights. The
-  -- password is stored as a scrypt hash exactly like the owner's; the plain
-  -- value is never written anywhere. The permissions column is a JSON array
-  -- of strings from the Permission union (server/auth.ts validates them on
-  -- the way in).
-  CREATE TABLE IF NOT EXISTS staff (
-    email       TEXT PRIMARY KEY,
-    salt        TEXT NOT NULL,
-    hash        TEXT NOT NULL,
-    permissions TEXT NOT NULL,
-    created_at  INTEGER NOT NULL
-  );
+let remoteClient: SupabaseClient | null = null;
+let remoteSyncing = false;
+let remoteSyncSubscribed = false;
 
-  -- Discount codes (Admin → Coupons). The code is stored UPPERCASE so the UNIQUE
-  -- index makes "save10" and "SAVE10" the same coupon.
-  CREATE TABLE IF NOT EXISTS coupons (
-    id   TEXT PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE,
-    data TEXT NOT NULL
-  );
+const remoteSyncEnabled = supabaseUrl !== undefined && supabaseUrl !== '' && supabaseKey !== '';
 
-  -- Customer reviews (moderated: pending until approved in the admin panel).
-  CREATE TABLE IF NOT EXISTS reviews (
-    id         TEXT PRIMARY KEY,
-    product_id TEXT NOT NULL,
-    status     TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    data       TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
-`);
+if (remoteSyncEnabled) {
+  try {
+    remoteClient = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (error) {
+    console.warn('[db] Failed to initialize Supabase sync client:', error instanceof Error ? error.message : error);
+  }
+}
 
-/** Store identity seeded on first run. `adminPassword` is intentionally empty:
- *  the real credential lives hashed under the `adminAuth` setting (server/auth.ts)
- *  and never appears in config payloads. */
+const parseSupabaseState = (raw: unknown): DbState | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as DbState;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') {
+    try {
+      return JSON.parse(JSON.stringify(raw)) as DbState;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const hydrateState = (next: Partial<DbState> | null | undefined): DbState => {
+  const base = structuredClone(EMPTY_STATE);
+  const merged = { ...base, ...(next ?? {}) } as DbState;
+  const collections = ['products', 'orders', 'sessions', 'staff', 'coupons', 'reviews'] as const;
+  for (const key of collections) {
+    if (!Array.isArray(merged[key])) merged[key] = [];
+  }
+  merged.settings = { ...base.settings, ...(next?.settings ?? {}) } as DbState['settings'];
+  if (!merged.settings.config) merged.settings.config = { ...DEFAULT_STORE_CONFIG, adminPassword: '' };
+  if (!merged.settings.adminAuth) merged.settings.adminAuth = null;
+  return merged;
+};
+
+const syncFromRemote = async (): Promise<boolean> => {
+  if (!remoteClient) return false;
+  try {
+    const { data, error } = await remoteClient
+      .from(syncTable)
+      .select('id, state')
+      .eq('id', 'shop')
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[db] Failed to read Supabase sync state:', error.message);
+      return false;
+    }
+
+    const state = parseSupabaseState(data?.state);
+    if (!state) return false;
+    _state = hydrateState(state);
+    save();
+    return true;
+  } catch (error) {
+    console.warn('[db] Supabase sync read failed:', error instanceof Error ? error.message : error);
+    return false;
+  }
+};
+
+const syncToRemote = async (): Promise<void> => {
+  if (!remoteClient || remoteSyncing) return;
+  try {
+    const { error } = await remoteClient
+      .from(syncTable)
+      .upsert({ id: 'shop', state: _state }, { onConflict: 'id' });
+
+    if (error) {
+      console.warn('[db] Failed to sync Supabase store state:', error.message);
+    }
+  } catch (error) {
+    console.warn('[db] Supabase sync write failed:', error instanceof Error ? error.message : error);
+  }
+};
+
+const subscribeToRemote = (): void => {
+  if (!remoteClient || remoteSyncSubscribed) return;
+  remoteSyncSubscribed = true;
+  const channel = remoteClient.channel('store-sync');
+  void channel
+    .on('postgres_changes', { event: '*', schema: 'public', table: syncTable }, async (payload) => {
+      if (payload.new && (payload.new as { id?: string }).id === 'shop') {
+        const next = parseSupabaseState((payload.new as { state?: unknown }).state);
+        if (!next) return;
+        remoteSyncing = true;
+        _state = hydrateState(next);
+        save();
+        remoteSyncing = false;
+      }
+    })
+    .subscribe();
+};
+
+// ---------------------------------------------------------------------------
+// Low-level file IO (atomic writes, single-writer per process)
+// ---------------------------------------------------------------------------
+
+let _state: DbState = structuredClone(EMPTY_STATE);
+let _loaded = false;
+
+function ensureLoaded(): void {
+  if (_loaded) return;
+  _loaded = true;
+  try {
+    const raw = fs.readFileSync(dbFile, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<DbState>;
+    _state = hydrateState(parsed);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (remoteClient) {
+        void syncFromRemote();
+      }
+      return;
+    }
+    console.error('[db] Failed to read ' + dbFile + ':', error);
+    _state = structuredClone(EMPTY_STATE);
+  }
+  if (remoteClient) {
+    void syncFromRemote();
+    subscribeToRemote();
+  }
+}
+
+function save(): void {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const tmp = dbFile + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(_state, null, 2), 'utf8');
+  fs.renameSync(tmp, dbFile);
+  if (remoteClient && !remoteSyncing) {
+    void syncToRemote();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Typed JSON helpers — no SQL, no native modules.
+// ---------------------------------------------------------------------------
+
+type Table = 'settings' | 'products' | 'orders' | 'sessions' | 'staff' | 'coupons' | 'reviews';
+
+const TABLES: Table[] = ['settings', 'products', 'orders', 'sessions', 'staff', 'coupons', 'reviews'];
+
+/** Row count for one table — `settings` counts the keys actually stored, which
+ *  is what SQLite's `COUNT(*)` reported for its key/value rows. */
+const countOf = (table: Table): number => {
+  if (table === 'settings') {
+    const s = _state.settings;
+    return (s.config ? 1 : 0) + (s.adminAuth ? 1 : 0);
+  }
+  return _state[table].length;
+};
+
+/** A staff row as `server/auth.ts` expects it: `permissions` is a JSON *string*
+ *  on the wire (it calls `JSON.parse`) even though the file keeps a real array
+ *  so it stays pleasant to read and hand-edit. */
+const staffRow = (row: DbState['staff'][number]): { email: string; salt: string; hash: string; permissions: string; created_at: number } => ({
+  email: row.email,
+  salt: row.salt,
+  hash: row.hash,
+  permissions: JSON.stringify(row.permissions ?? []),
+  created_at: row.created_at,
+});
+
+const byEmail = (row: DbState['staff'][number], email: unknown): boolean =>
+  row.email.toLowerCase() === String(email).trim().toLowerCase();
+
+// ---- sessions ----------------------------------------------------------
+
+export const deleteExpiredSessions = (now: number): void => {
+  ensureLoaded();
+  const before = _state.sessions.length;
+  _state.sessions = _state.sessions.filter((s) => s.expires_at >= now);
+  if (_state.sessions.length < before) save();
+};
+
+export const insertSession = (token: string, email: string, expiresAt: number): void => {
+  ensureLoaded();
+  _state.sessions.push({ token, email, expires_at: expiresAt });
+  save();
+};
+
+export const getSessionByToken = (token: string): { email: string; expires_at: number } | undefined => {
+  ensureLoaded();
+  return _state.sessions.find((s) => s.token === token);
+};
+
+export const deleteSessionByToken = (token: string): void => {
+  ensureLoaded();
+  const before = _state.sessions.length;
+  _state.sessions = _state.sessions.filter((s) => s.token !== token);
+  if (_state.sessions.length < before) save();
+};
+
+export const deleteSessionsByEmail = (email: string): void => {
+  ensureLoaded();
+  const target = email.trim().toLowerCase();
+  const before = _state.sessions.length;
+  _state.sessions = _state.sessions.filter((s) => s.email.toLowerCase() !== target);
+  if (_state.sessions.length < before) save();
+};
+
+// ---- staff -------------------------------------------------------------
+export const readStaffRow = (email: string): { email: string; salt: string; hash: string; permissions: string; created_at: number } | null => {
+  ensureLoaded();
+  const found = _state.staff.find((row) => byEmail(row, email));
+  return found ? staffRow(found) : null;
+};
+
+export const listStaffRows = (): { email: string; salt: string; hash: string; permissions: string; created_at: number }[] => {
+  ensureLoaded();
+  return [..._state.staff]
+    .sort((a, b) => a.created_at - b.created_at)
+    .map(staffRow);
+};
+
+export const insertStaffRow = (
+  email: string,
+  salt: string,
+  hash: string,
+  permissions: string,
+  createdAt: number,
+): void => {
+  ensureLoaded();
+  let parsed: Permission[] = [];
+  try { parsed = JSON.parse(permissions) as Permission[]; } catch { parsed = []; }
+  _state.staff.push({ email, salt, hash, permissions: parsed, created_at: createdAt });
+  save();
+};
+
+export const updateStaffPermissions = (email: string, permissions: string): void => {
+  ensureLoaded();
+  const found = _state.staff.find((row) => byEmail(row, email));
+  if (!found) return;
+  try { found.permissions = JSON.parse(permissions) as Permission[]; } catch { found.permissions = []; }
+  save();
+};
+
+export const updateStaffSaltHash = (email: string, salt: string, hash: string): void => {
+  ensureLoaded();
+  const found = _state.staff.find((row) => byEmail(row, email));
+  if (!found) return;
+  found.salt = salt;
+  found.hash = hash;
+  save();
+};
+
+export const deleteStaffRow = (email: string): { changes: number } => {
+  ensureLoaded();
+  const before = _state.staff.length;
+  _state.staff = _state.staff.filter((row) => !byEmail(row, email));
+  if (_state.staff.length < before) save();
+  return { changes: before - _state.staff.length };
+};
+
+// ---- orders ------------------------------------------------------------
+
+
+/** Size of the data file on disk, or 0 when it has not been written yet. */
+export const fileSize = (filePath: string): number => {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+};
+
+
+
+
+
 export const DEFAULT_CONFIG: StoreConfig = { ...DEFAULT_STORE_CONFIG, adminPassword: '' };
 
 // ---- settings -------------------------------------------------------------
 
+/** Only two keys are ever stored (`config`, `adminAuth`), so the state keeps
+ *  them as first-class fields rather than a free-for-all map. */
 export const getSetting = <T,>(key: string): T | null => {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-    | { value: string }
-    | undefined;
-  if (!row) return null;
-  try {
-    return JSON.parse(row.value) as T;
-  } catch (error) {
-    console.error(`[db] Corrupt settings entry "${key}":`, error);
-    return null;
-  }
+  ensureLoaded();
+  if (key === 'config') return _state.settings.config as unknown as T;
+  if (key === 'adminAuth') return _state.settings.adminAuth as unknown as T | null;
+  return null;
 };
 
 export const setSetting = (key: string, value: unknown): void => {
-  db.prepare(
-    `INSERT INTO settings (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-  ).run(key, JSON.stringify(value));
+  ensureLoaded();
+  if (key === 'config') _state.settings.config = value as StoreConfig;
+  else if (key === 'adminAuth') _state.settings.adminAuth = value as DbSettings['adminAuth'];
+  else {
+    console.warn('[db] Ignoring unknown settings key "' + key + '".');
+    return;
+  }
+  save();
 };
 
 // ---- products -------------------------------------------------------------
 
-export const allProducts = (): Product[] =>
-  (db.prepare('SELECT data FROM products ORDER BY sort_index ASC').all() as { data: string }[])
-    .map((row) => {
-      try {
-        return normalizeProduct(JSON.parse(row.data));
-      } catch (error) {
-        console.error('[db] Skipping corrupt product row:', error);
-        return null;
-      }
-    })
-    .filter((p): p is Product => p !== null);
+export const allProducts = (): Product[] => {
+  ensureLoaded();
+  // `sort_index` mirrors the old column: lower sorts first (newer admin
+  // products were prepended, so they hold the most negative numbers).
+  return [..._state.products]
+    .sort((a, b) => a.sort_index - b.sort_index)
+    .map((row) => row.product);
+};
 
 export const getProduct = (id: string): Product | null => {
-  const row = db.prepare('SELECT data FROM products WHERE id = ?').get(id) as
-    | { data: string }
-    | undefined;
-  if (!row) return null;
-  try {
-    return normalizeProduct(JSON.parse(row.data));
-  } catch (error) {
-    console.error(`[db] Corrupt product row "${id}":`, error);
-    return null;
-  }
+  ensureLoaded();
+  return _state.products.find((row) => row.id === id)?.product ?? null;
 };
 
 /** Insert a brand-new product at the top of the list (matches the old client
  *  behaviour where new products were prepended). */
 export const insertProduct = (product: Product): void => {
-  const row = db.prepare('SELECT COALESCE(MIN(sort_index), 0) - 1 AS next FROM products').get() as {
-    next: number;
-  };
-  db.prepare('INSERT INTO products (id, data, sort_index) VALUES (?, ?, ?)').run(
-    product.id,
-    JSON.stringify(product),
-    row.next,
-  );
+  ensureLoaded();
+  const next = _state.products.reduce((min, row) => Math.min(min, row.sort_index), 0) - 1;
+  _state.products.push({ id: product.id, product, sort_index: next });
+  save();
 };
 
-/** Replace an existing product's record; position (sort_index) is preserved. */
+/** Replace an existing product's record; position (`sort_index`) is preserved. */
 export const updateProductData = (product: Product): void => {
-  db.prepare('UPDATE products SET data = ? WHERE id = ?').run(JSON.stringify(product), product.id);
+  ensureLoaded();
+  const row = _state.products.find((r) => r.id === product.id);
+  if (row) row.product = product;
+  save();
 };
 
 export const removeProduct = (id: string): void => {
-  db.prepare('DELETE FROM products WHERE id = ?').run(id);
+  ensureLoaded();
+  _state.products = _state.products.filter((row) => row.id !== id);
+  save();
 };
 
 /** Wipe and refill in one transaction — used by import/reset. */
 export const replaceProducts = (products: Product[]): void => {
-  db.prepare('DELETE FROM products').run();
-  const insert = db.prepare('INSERT INTO products (id, data, sort_index) VALUES (?, ?, ?)');
-  products.forEach((product, index) => insert.run(product.id, JSON.stringify(product), index));
+  ensureLoaded();
+  _state.products = products.map((product, index) => ({
+    id: product.id,
+    product,
+    sort_index: index,
+  }));
+  save();
 };
 
 export const seedProducts = (): void => {
@@ -184,41 +431,36 @@ export const seedProducts = (): void => {
 
 // ---- orders ---------------------------------------------------------------
 
-export const allOrders = (): Order[] =>
-  (db.prepare('SELECT data FROM orders ORDER BY created_at DESC').all() as { data: string }[])
-    .map((row) => JSON.parse(row.data) as Order);
+/** Newest first — the admin panels list the most recent order at the top. */
+export const allOrders = (): Order[] => {
+  ensureLoaded();
+  return [..._state.orders].sort((a, b) => b.createdAt - a.createdAt);
+};
 
 /** Single order by id, or null when it does not exist. */
 export const getOrder = (id: string): Order | null => {
-  const row = db.prepare('SELECT data FROM orders WHERE id = ?').get(id) as
-    | { data: string }
-    | undefined;
-  return row ? (JSON.parse(row.data) as Order) : null;
+  ensureLoaded();
+  return _state.orders.find((order) => order.id === id) ?? null;
 };
 
 export const insertOrder = (order: Order): void => {
-  db.prepare(
-    'INSERT INTO orders (id, reference, created_at, status, data) VALUES (?, ?, ?, ?, ?)',
-  ).run(order.id, order.reference, order.createdAt, order.status, JSON.stringify(order));
+  ensureLoaded();
+  _state.orders.push(order);
+  save();
 };
 
-export const orderReferenceExists = (reference: string): boolean =>
-  db.prepare('SELECT 1 FROM orders WHERE reference = ?').get(reference) !== undefined;
+export const orderReferenceExists = (reference: string): boolean => {
+  ensureLoaded();
+  return _state.orders.some((order) => order.reference === reference);
+};
 
-/** Updates both the indexed `status` column and the status inside the JSON
- *  blob. Returns false when the order does not exist. */
+/** Updates the order's status. Returns false when the order does not exist. */
 export const updateOrderStatusRow = (id: string, status: OrderStatus): boolean => {
-  const row = db.prepare('SELECT data FROM orders WHERE id = ?').get(id) as
-    | { data: string }
-    | undefined;
-  if (!row) return false;
-  const order = JSON.parse(row.data) as Order;
+  ensureLoaded();
+  const order = _state.orders.find((o) => o.id === id);
+  if (!order) return false;
   order.status = status;
-  db.prepare('UPDATE orders SET status = ?, data = ? WHERE id = ?').run(
-    status,
-    JSON.stringify(order),
-    id,
-  );
+  save();
   return true;
 };
 
@@ -230,41 +472,47 @@ export const updateOrderPaymentNote = (
   id: string,
   patch: { confirmed?: boolean; note?: string },
 ): Order | null => {
+  ensureLoaded();
   const order = getOrder(id);
   if (!order) return null;
   if (patch.confirmed !== undefined) order.paymentConfirmed = patch.confirmed;
   if (patch.note !== undefined) order.paymentNote = patch.note;
-  db.prepare('UPDATE orders SET data = ? WHERE id = ?').run(JSON.stringify(order), id);
+  save();
   return order;
 };
 
 export const replaceOrders = (orders: Order[]): void => {
-  db.prepare('DELETE FROM orders').run();
-  const insert = db.prepare(
-    'INSERT INTO orders (id, reference, created_at, status, data) VALUES (?, ?, ?, ?, ?)',
-  );
-  orders.forEach((order) =>
-    insert.run(order.id, order.reference, order.createdAt, order.status, JSON.stringify(order)),
-  );
+  ensureLoaded();
+  _state.orders = [...orders];
+  save();
 };
 
 export const clearOrders = (): void => {
-  db.prepare('DELETE FROM orders').run();
+  ensureLoaded();
+  _state.orders = [];
+  save();
 };
 
 /** Deletes one order; returns false when the id does not exist. */
-export const removeOrder = (id: string): boolean =>
-  db.prepare('DELETE FROM orders WHERE id = ?').run(id).changes > 0;
+export const removeOrder = (id: string): boolean => {
+  ensureLoaded();
+  const before = _state.orders.length;
+  _state.orders = _state.orders.filter((order) => order.id !== id);
+  const changed = before !== _state.orders.length;
+  if (changed) save();
+  return changed;
+};
 
 /** Applies an admin edit to the editable fields of an order (customer details,
  *  status, payment bookkeeping) and returns the stored order, or null when it
  *  does not exist.
  *
  *  `reference` and `created_at` are the order's identity — they are copied from
- *  the stored row rather than the patch, so an edit can never rewrite history or
- *  collide with the UNIQUE index. The indexed `status` column is rewritten
- *  alongside the JSON blob so the two never drift. */
+ *  the stored row rather than the patch, so an edit can never rewrite history.
+ *  `lines`/`total`/`payment` are deliberately absent from the editable set:
+ *  they are only changed by checkout, so a manual edit cannot invent a price. */
 export const updateOrderFields = (id: string, patch: Partial<Order>): Order | null => {
+  ensureLoaded();
   const existing = getOrder(id);
   if (!existing) return null;
   const merged: Order = {
@@ -273,133 +521,127 @@ export const updateOrderFields = (id: string, patch: Partial<Order>): Order | nu
     id: existing.id,
     reference: existing.reference,
     createdAt: existing.createdAt,
-    // `lines`/`total`/`payment` are deliberately absent from the editable set —
-    // they are only changed by checkout, so a manual edit cannot invent a price.
     lines: existing.lines,
     total: existing.total,
   };
-  db.prepare('UPDATE orders SET status = ?, data = ? WHERE id = ?').run(
-    merged.status,
-    JSON.stringify(merged),
-    id,
-  );
+  const index = _state.orders.findIndex((order) => order.id === id);
+  _state.orders[index] = merged;
+  save();
   return merged;
 };
 
 // ---- coupons ---------------------------------------------------------------
 
-export const allCoupons = (): Coupon[] =>
-  (db.prepare('SELECT data FROM coupons').all() as { data: string }[])
-    .map((row) => JSON.parse(row.data) as Coupon)
-    .sort((a, b) => b.createdAt - a.createdAt);
+/** Newest first. Codes are stored normalised (UPPERCASE), exactly as the
+ *  UNIQUE index enforced before, so `save10` and `SAVE10` collide. */
+export const allCoupons = (): Coupon[] => {
+  ensureLoaded();
+  return [..._state.coupons].sort((a, b) => b.createdAt - a.createdAt);
+};
+
 export const getCoupon = (id: string): Coupon | null => {
-  const row = db.prepare('SELECT data FROM coupons WHERE id = ?').get(id) as
-    | { data: string }
-    | undefined;
-  return row ? (JSON.parse(row.data) as Coupon) : null;
+  ensureLoaded();
+  return _state.coupons.find((coupon) => coupon.id === id) ?? null;
 };
 
 /** Lookup by the normalised (UPPERCASE) code — the shopper's input is
  *  normalised by the route before calling this. */
 export const getCouponByCode = (code: string): Coupon | null => {
-  const row = db.prepare('SELECT data FROM coupons WHERE code = ?').get(code) as
-    | { data: string }
-    | undefined;
-  return row ? (JSON.parse(row.data) as Coupon) : null;
+  ensureLoaded();
+  const wanted = code.trim().toUpperCase();
+  return _state.coupons.find((coupon) => coupon.code.toUpperCase() === wanted) ?? null;
 };
 
 export const insertCoupon = (coupon: Coupon): void => {
-  db.prepare('INSERT INTO coupons (id, code, data) VALUES (?, ?, ?)').run(
-    coupon.id,
-    coupon.code,
-    JSON.stringify(coupon),
-  );
+  ensureLoaded();
+  if (getCouponByCode(coupon.code)) {
+    throw new Error('UNIQUE constraint failed: coupons.code');
+  }
+  _state.coupons.push(coupon);
+  save();
 };
 
-/** Replaces a coupon; the code column is rewritten alongside the JSON blob so
- *  the UNIQUE index and the record never drift. Returns false when missing. */
-export const updateCouponRow = (coupon: Coupon): boolean =>
-  db.prepare('UPDATE coupons SET code = ?, data = ? WHERE id = ?')
-    .run(coupon.code, JSON.stringify(coupon), coupon.id).changes > 0;
-
-export const removeCoupon = (id: string): boolean =>
-  db.prepare('DELETE FROM coupons WHERE id = ?').run(id).changes > 0;
-
-/** Full-table coupon replacement for imports: wipes and re-inserts inside one
- *  transaction so a half-written file can never strand the table. Codes are
- *  stored UPPERCASE alongside the blob to keep the UNIQUE index honest. */
-export const replaceCoupons = (coupons: Coupon[]): void => {
-  const insert = db.prepare('INSERT INTO coupons (id, code, data) VALUES (?, ?, ?)');
-  db.transaction(() => {
-    db.prepare('DELETE FROM coupons').run();
-    for (const coupon of coupons) {
-      insert.run(coupon.id, coupon.code, JSON.stringify(coupon));
-    }
-  })();
-}
-
-// ---- reviews ---------------------------------------------------------------
-
-export const allReviews = (productId?: string): ProductReview[] => {
-  const rows = (
-    productId
-      ? db.prepare('SELECT data FROM reviews WHERE product_id = ? ORDER BY created_at DESC').all(productId)
-      : db.prepare('SELECT data FROM reviews ORDER BY created_at DESC').all()
-  ) as { data: string }[];
-  return rows.map((row) => JSON.parse(row.data) as ProductReview);
-};
-
-export const getReview = (id: string): ProductReview | null => {
-  const row = db.prepare('SELECT data FROM reviews WHERE id = ?').get(id) as
-    | { data: string }
-    | undefined;
-  return row ? (JSON.parse(row.data) as ProductReview) : null;
-};
-
-export const insertReview = (review: ProductReview): void => {
-  db.prepare(
-    'INSERT INTO reviews (id, product_id, status, created_at, data) VALUES (?, ?, ?, ?, ?)',
-  ).run(review.id, review.productId, review.status, review.createdAt, JSON.stringify(review));
-};
-
-/** Mirrors `status` onto the indexed column alongside the JSON blob.
- *  Returns false when the review does not exist. */
-export const updateReviewStatusRow = (id: string, status: ProductReview['status']): boolean => {
-  const review = getReview(id);
-  if (!review) return false;
-  db.prepare('UPDATE reviews SET status = ?, data = ? WHERE id = ?').run(
-    status,
-    JSON.stringify({ ...review, status }),
-    id,
-  );
+/** Replaces a coupon; returns false when missing. */
+export const updateCouponRow = (coupon: Coupon): boolean => {
+  ensureLoaded();
+  const index = _state.coupons.findIndex((c) => c.id === coupon.id);
+  if (index === -1) return false;
+  _state.coupons[index] = coupon;
+  save();
   return true;
 };
 
-export const removeReview = (id: string): boolean =>
-  db.prepare('DELETE FROM reviews WHERE id = ?').run(id).changes > 0;
+export const removeCoupon = (id: string): boolean => {
+  ensureLoaded();
+  const before = _state.coupons.length;
+  _state.coupons = _state.coupons.filter((coupon) => coupon.id !== id);
+  const changed = before !== _state.coupons.length;
+  if (changed) save();
+  return changed;
+};
 
-/** Full-table review replacement for imports (status mirrored onto the indexed
- *  column alongside the blob, exactly like single inserts). */
+/** Full-table coupon replacement for imports — the whole array lands in one
+ *  write, so a half-read file can never strand the collection. */
+export const replaceCoupons = (coupons: Coupon[]): void => {
+  ensureLoaded();
+  _state.coupons = [...coupons];
+  save();
+};
+
+// ---- reviews ---------------------------------------------------------------
+
+/** Newest first, optionally narrowed to one product. */
+export const allReviews = (productId?: string): ProductReview[] => {
+  ensureLoaded();
+  const rows = productId
+    ? _state.reviews.filter((review) => review.productId === productId)
+    : [..._state.reviews];
+  return rows.sort((a, b) => b.createdAt - a.createdAt);
+};
+
+export const getReview = (id: string): ProductReview | null => {
+  ensureLoaded();
+  return _state.reviews.find((review) => review.id === id) ?? null;
+};
+
+export const insertReview = (review: ProductReview): void => {
+  ensureLoaded();
+  _state.reviews.push(review);
+  save();
+};
+
+/** Approves or re-pends a review. Returns false when it does not exist. */
+export const updateReviewStatusRow = (id: string, status: ProductReview['status']): boolean => {
+  ensureLoaded();
+  const review = _state.reviews.find((r) => r.id === id);
+  if (!review) return false;
+  review.status = status;
+  save();
+  return true;
+};
+
+export const removeReview = (id: string): boolean => {
+  ensureLoaded();
+  const before = _state.reviews.length;
+  _state.reviews = _state.reviews.filter((review) => review.id !== id);
+  const changed = before !== _state.reviews.length;
+  if (changed) save();
+  return changed;
+};
+
+/** Full-table review replacement for imports. */
 export const replaceReviews = (reviews: ProductReview[]): void => {
-  const insert = db.prepare(
-    'INSERT INTO reviews (id, product_id, status, created_at, data) VALUES (?, ?, ?, ?, ?)',
-  );
-  db.transaction(() => {
-    db.prepare('DELETE FROM reviews').run();
-    for (const review of reviews) {
-      insert.run(review.id, review.productId, review.status, review.createdAt, JSON.stringify(review));
-    }
-  })();
-}
+  ensureLoaded();
+  _state.reviews = [...reviews];
+  save();
+};
 
 /** Approved-review aggregates per product for the public card badges. */
 export const reviewSummaries = (): Record<string, { count: number; average: number }> => {
-  const rows = db
-    .prepare("SELECT data FROM reviews WHERE status = 'approved'")
-    .all() as { data: string }[];
+  ensureLoaded();
   const acc = new Map<string, { count: number; total: number }>();
-  for (const row of rows) {
-    const review = JSON.parse(row.data) as ProductReview;
+  for (const review of _state.reviews) {
+    if (review.status !== 'approved') continue;
     const entry = acc.get(review.productId) ?? { count: 0, total: 0 };
     entry.count += 1;
     entry.total += review.rating;
@@ -412,25 +654,83 @@ export const reviewSummaries = (): Record<string, { count: number; average: numb
   return out;
 };
 
-// ---- orders (lookup helpers) ----------------------------------------------
+// ---- orders (lookup helpers) -----------------------------------------------
 
 /** Lookup by the FAS-###### reference a shopper was given at checkout. */
 export const getOrderByReference = (reference: string): Order | null => {
-  const row = db.prepare('SELECT data FROM orders WHERE reference = ?').get(reference) as
-    | { data: string }
-    | undefined;
-  return row ? (JSON.parse(row.data) as Order) : null;
+  ensureLoaded();
+  return _state.orders.find((order) => order.reference === reference) ?? null;
+};
+
+// ---------------------------------------------------------------------------
+// Database admin operations (JSON-file equivalents of the old SQLite PRAGMA /
+// VACUUM / VACUUM INTO concepts)
+// ---------------------------------------------------------------------------
+
+/** Run a batch of mutations as one logical unit, saving once at the end.
+ *  Returns the callback's result so callers can use it as a function factory
+ *  (`const run = withTransaction(() => ...); return run();`) or ignore it. */
+export const withTransaction = <T>(callback: () => T): T => {
+  ensureLoaded();
+  const result = callback();
+  save();
+  return result;
+};
+
+/** One row per table: name + approximate row count. */
+export const getDatabaseTables = (): { name: string; rows: number }[] => {
+  ensureLoaded();
+  return TABLES.map((name) => ({ name, rows: countOf(name) }));
+};
+
+/** Row count for one table. `settings` counts the stored keys. */
+export const getTableRowCount = (name: string): { n: number } => {
+  ensureLoaded();
+  return { n: countOf(name as Table) };
+};
+
+/** Validate the on-disk JSON is readable. Returns `[{ integrity_check: 'ok' }]`
+ *  or an error row when the file is corrupt or missing. */
+export const integrityCheck = (): { integrity_check: string }[] => {
+  try {
+    fs.readFileSync(dbFile, 'utf8');
+    return [{ integrity_check: 'ok' }];
+  } catch (error) {
+    return [{
+      integrity_check: 'error: ' + (error instanceof Error ? error.message : String(error)),
+    }];
+  }
+};
+
+/** Rewrite the file compactly (reclaims space from a prior purge). Data is
+ *  unchanged — safe to run while shoppers browse. */
+export const optimize = (): void => {
+  ensureLoaded();
+  save();
+};
+
+/** Alias for `optimize` — keeps the old `VACUUM` name working for callers. */
+export const vacuum = (): void => {
+  optimize();
+};
+
+/** Copy the live store file to `destination` for backup/restore. */
+export const vacuumInto = (destination: string): void => {
+  ensureLoaded();
+  fs.copyFileSync(dbFile, destination);
 };
 
 // ---- first-run seeding ----------------------------------------------------
 
-// Only seed on a brand-new database: if the admin deliberately deletes every
+// Only seed on a brand-new store: if the admin deliberately deletes every
 // product, a restart must not resurrect the seed catalogue (the reset endpoint
 // does that on purpose via `seedProducts` above).
+ensureLoaded();
 if (getSetting('config') === null) {
   setSetting('config', DEFAULT_CONFIG);
   seedProducts();
   console.log(
-    `[db] Fresh database created at ${dbFile} (seeded ${INITIAL_PRODUCTS.length} products).`,
+    '[db] Fresh store created at ' + dbFile + ' (seeded ' + INITIAL_PRODUCTS.length + ' products).',
   );
 }
+

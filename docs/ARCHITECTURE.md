@@ -14,7 +14,7 @@ Browser (React SPA)
 Vite dev server :5173  ──proxies /api──▶  Express API :3001
                                             │
                                             ▼
-                                    SQLite (server/data/store.db)
+                                    JSON file (server/data/store.json)
 ```
 
 In production `npm start` serves `dist/` from the same Express process, so the
@@ -58,7 +58,7 @@ product cannot look sold-out on one side and in-stock on the other.
 
 | File | Responsibility |
 | --- | --- |
-| `db.ts` | Opens SQLite, creates the schema, typed queries |
+| `db.ts` | Opens the JSON store, seeds it, typed queries |
 | `auth.ts` | Password hashing, sessions, staff accounts, permission resolution, rate limiting |
 | `index.ts` | All routes, validation, order transaction |
 
@@ -109,8 +109,8 @@ on both sides.
 
 ## Key decisions
 
-**SQLite inside the Node process.** No server to install, no connection string, no
-credentials. One file you can copy to back up the entire store. WAL mode keeps
+**A JSON file inside the Node process.** No server to install, no connection string, no
+credentials. One file you can copy to back up the entire store. Atomic writes keep
 reads fast during writes.
 
 **Whole records as JSON columns.** The app only reads whole records, so

@@ -86,22 +86,22 @@ export interface DatabaseTableInfo {
   rows: number;
 }
 
-/** Snapshot of the SQLite file: where it lives, how big it is, and what is in
+/** Snapshot of the JSON store: where it lives, how big it is, and what is in
  *  it. Returned by `GET /api/database` and after an optimize. */
 export interface DatabaseInfo {
   file: string;
   sizeBytes: number;
-  /** Write-ahead log size (0 when the database is fully checkpointed). */
+  /** Write-ahead log size — always 0 for the JSON store. */
   walBytes: number;
   journalMode: string;
   pageSize: number;
   pageCount: number;
-  /** Pages on the freelist — space an optimize/VACUUM can reclaim. */
+  /** Pages on the freelist — always 0 for the JSON store. */
   freelistPages: number;
   tables: DatabaseTableInfo[];
 }
 
-/** Result of `PRAGMA integrity_check`: `ok` is false when messages lists problems. */
+/** Result of the integrity check: `ok` is false when messages lists problems. */
 export interface IntegrityResult {
   ok: boolean;
   messages: string[];
@@ -253,9 +253,9 @@ export const api = {
 
   // ---- Admin → Database (database-file management) ------------------------
   getDatabaseInfo: () => request<DatabaseInfo>('/api/database'),
-  /** Runs `PRAGMA integrity_check` and reports `ok` or the list of problems. */
+  /** Runs the integrity check and reports `ok` or the list of problems. */
   checkDatabase: () => request<IntegrityResult>('/api/database/check', { method: 'POST' }),
-  /** VACUUMs the file and returns fresh stats. */
+  /** Rewrites the file compactly and returns fresh stats. */
   optimizeDatabase: () => request<DatabaseInfo>('/api/database/optimize', { method: 'POST' }),
   /** Purges the whole order book; resolves with the number of orders removed. */
   clearOrders: () => request<{ cleared: number }>('/api/orders', { method: 'DELETE' }),

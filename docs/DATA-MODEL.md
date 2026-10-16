@@ -1,59 +1,42 @@
 # Data model
 
-Two layers: the **SQLite schema** on disk, and the **TypeScript shapes** in
+Two layers: the **JSON file** on disk, and the **TypeScript shapes** in
 `types.ts` that both client and server speak.
 
 ---
 
-## Database (`server/data/store.db`)
+## Database (`server/data/store.json`)
 
-Created by `server/db.ts` with `CREATE TABLE IF NOT EXISTS`, so starting against
-an existing file is a no-op migration. There is no separate migration tool.
+The whole store is a single JSON file, `server/data/store.json` (or wherever
+`DB_DIR` points), written atomically to a temp file and renamed over the real
+one so a crash can never leave a half-written blob. There is no schema to
+migrate — `normalizeProduct()` heals old records on read.
 
-```sql
-CREATE TABLE settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE products (
-    id         TEXT PRIMARY KEY,
-    data       TEXT NOT NULL,   -- whole product as JSON
-    -- Newest admin-created products sort first (negative indices); seed data
-    -- keeps its file order. Set at insert, never rewritten on update.
-    sort_index INTEGER NOT NULL
-);
-
-CREATE TABLE orders (
-    id         TEXT PRIMARY KEY,
-    reference  TEXT NOT NULL UNIQUE,   -- e.g. FAS-482913
-    created_at INTEGER NOT NULL,
-    status     TEXT NOT NULL,
-    data       TEXT NOT NULL           -- whole order as JSON
-);
-
-CREATE TABLE sessions (
-    token      TEXT PRIMARY KEY,
-    email      TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
-);
-
-CREATE TABLE staff (
-    email       TEXT PRIMARY KEY,
-    salt        TEXT NOT NULL,
-    hash        TEXT NOT NULL,
-    permissions TEXT NOT NULL,   -- JSON array of Permission strings
-    created_at  INTEGER NOT NULL
-);
+```json
+{
+  "settings": {
+    "config": { ...StoreConfig },
+    "adminAuth": { "email": "...", "salt": "...", "hash": "..." } | null
+  },
+  "products": [{ "id": "...", "product": { ...Product }, "sort_index": -3 }],
+  "orders": [ { ...Order } ],
+  "sessions": [{ "token": "...", "email": "...", "expires_at": ... }],
+  "staff": [{ "email": "...", "salt": "...", "hash": "...", "permissions": [...], "created_at": ... }],
+  "coupons": [ { ...Coupon } ],
+  "reviews": [ { ...ProductReview } ]
+}
 ```
+
+When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set, the same shape is
+also mirrored to a `store_state` row in Supabase (`id = 'shop'`) for cloud sync;
+local JSON remains the fallback and is always kept in sync.
 
 ### Design notes
 
-**Whole record as JSON.** `products.data` and `orders.data` hold the entire
-object. The app only ever reads and writes whole records, so normalising them
-into columns would add joins and migrations for no gain. Only fields that are
+**One record per row.** Each product and order is stored as a single JSON blob
+next to its id, so the app reads and writes whole records. Only fields that are
 genuinely queried or ordered on (`sort_index`, `reference`, `status`,
-`created_at`) get their own column.
+`created_at`) are indexed for ordering and lookups.
 
 **`settings` keys in use:**
 
@@ -66,13 +49,13 @@ The owner's credentials deliberately live in `settings` rather than `staff` so
 there is exactly one place to look, and so the owner cannot be reached by the
 staff-management code at all.
 
-**WAL mode.** The database runs in `journal_mode = WAL` with `busy_timeout =
-5000`, so reads stay fast while a write is in flight and a `tsx watch` restart
-mid-request does not error.
+**Atomic writes.** The file is written to a temp name and renamed over the real
+one, so a crashed restart can never leave a half-written JSON blob, and a
+`tsx watch` restart mid-request does not lose data.
 
 **Where the file lives:** `server/data/` by default, or wherever `DB_DIR`
-points. Backups are made with SQLite's `VACUUM INTO`, which produces a
-consistent copy without stopping the server.
+points. Backups are made by copying `store.json`, which produces a consistent copy
+without stopping the server.
 
 ---
 
@@ -188,7 +171,7 @@ uses the same repair pass.
 
 | Data | Lives in | Why |
 | --- | --- | --- |
-| Products, orders, settings, staff | SQLite database | Shared by every visitor, survives everything |
+| Products, orders, settings, staff | JSON file | Shared by every visitor, survives everything |
 | Session token | `localStorage` (`fas:authToken`) | The only other key written, per browser |
 | Cart | `localStorage` (`fas:cart`) | Per-shopper state, not store data |
 | Theme | `localStorage` (`theme`) | Per-shopper preference |
